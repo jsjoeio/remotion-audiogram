@@ -2,7 +2,23 @@ node_modules
 dist
 .DS_Store
 .env
+.env.local
 
 # Ignore the output video from Git but not videos you import into src/.
 out
+
+# Whisper.cpp install + models (~1.5 GB). Rebuilt locally via `bun transcribe.ts`.
 whisper.cpp
+
+# Transcription temp files
+tmp/
+
+# Local media assets (audio, captions, covers) — keep private, not on GitHub
+public/*
+!public/.gitkeep
+
+# Windows/WSL download metadata (e.g. files saved from Telegram in Chrome)
+*:Zone.Identifier
+
+# Bun is the package manager for this project
+package-lock.json

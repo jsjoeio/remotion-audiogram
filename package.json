@@ -7,21 +7,22 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
-    "@remotion/cli": "4.0.475",
-    "@remotion/media-utils": "4.0.475",
-    "@remotion/media-parser": "4.0.475",
-    "@remotion/media": "4.0.475",
     "@remotion/captions": "4.0.475",
-    "@remotion/zod-types": "4.0.475",
+    "@remotion/cli": "4.0.475",
     "@remotion/google-fonts": "4.0.475",
-    "@remotion/layout-utils": "4.0.475",
     "@remotion/install-whisper-cpp": "4.0.475",
+    "@remotion/layout-utils": "4.0.475",
+    "@remotion/media": "4.0.475",
+    "@remotion/media-parser": "4.0.475",
+    "@remotion/media-utils": "4.0.475",
+    "@remotion/tailwind-v4": "4.0.475",
+    "@remotion/whisper-web": "4.0.475",
+    "@remotion/zod-types": "4.0.475",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.475",
-    "zod": "4.3.6",
-    "@remotion/tailwind-v4": "4.0.475",
-    "tailwindcss": "4.0.0"
+    "tailwindcss": "4.0.0",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@remotion/eslint-config-flat": "4.0.475",
@@ -36,7 +37,9 @@
     "dev": "remotion studio",
     "build": "remotion bundle",
     "upgrade": "remotion upgrade",
-    "lint": "eslint src && tsc"
+    "lint": "eslint src && tsc",
+    "convert-audio": "bun convert-audio.ts",
+    "transcribe": "bun transcribe.ts"
   },
   "sideEffects": [
     "*.css"

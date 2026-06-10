@@ -10,18 +10,93 @@ This template is for creating "audiograms". In other words, video clips from pod
 
 ## Getting started
 
-```
-npm i
+```bash
+bun install
+bun run dev
 ```
 
-```
-npx remotion studio
-```
+`bun run dev` is the same as `npx remotion studio` — it just runs the `dev` script from `package.json`, which starts Remotion Studio. Use whichever you prefer.
 
 Start changing things like this:
 
 - Adjust parameters in `src/Root.tsx` or in the Studio sidebar
 - Replacing audio, cover and subtitles in the `public` folder
+
+## Workflow: Telegram audio → audiogram
+
+Audio saved from Telegram is usually **Opus inside an Ogg container**, even if your browser names it `.wav`.  
+Remotion Studio needs a real PCM WAV file. The template is wired to `public/dialogue.wav` (see `src/Root.tsx`).
+
+**Privacy:** nothing in `public/` is committed to git (audio, captions, cover image). Those files stay on your machine only. After cloning, you add your own assets locally.
+
+### Step 1 — Download from Telegram
+
+1. Open the voice message in Telegram (desktop or web).
+2. Download/save the audio into the `public/` folder.
+
+**Easiest naming (recommended):** save it as `public/dialogue.wav`.  
+The extension is wrong, but that matches what this project expects — you'll fix it in step 2.
+
+**Also fine:** save as `public/dialogue.ogg` (or whatever Telegram calls it). You'll just type that path when `convert-audio` asks.
+
+### Step 2 — Convert to a real WAV
+
+```bash
+bun run convert-audio
+```
+
+The script asks three questions. Press **Enter** to accept each default unless noted below.
+
+| Prompt | Default | What to do |
+| --- | --- | --- |
+| Path to audio file | `./public/dialogue.wav` | Press Enter if you saved as `dialogue.wav`. If you saved as `dialogue.ogg`, type `./public/dialogue.ogg`. |
+| Output WAV path | same as input | **If input is `dialogue.ogg`:** type `./public/dialogue.wav` so the template can find it. **If input is already `dialogue.wav`:** press Enter (overwrites in place). |
+| Sample rate | `48000` | Press Enter |
+
+What the script does:
+
+- Detects the real format (Ogg/Opus, MP3, etc.) — the file extension does not matter
+- Backs up the original before overwriting (e.g. `public/dialogue-original.wav` or `public/dialogue-original.ogg`)
+- Writes a Remotion-ready `public/dialogue.wav`
+
+Check the result:
+
+```bash
+file public/dialogue.wav
+# Bad:  Ogg data, Opus audio
+# Good: RIFF (little-endian) data, WAVE audio
+```
+
+### Step 3 — Transcribe captions
+
+```bash
+bun run transcribe
+```
+
+Prompts:
+
+- **Audio path:** press Enter (default `./public/dialogue.wav`) — transcription accepts Opus/Ogg too, but use the converted WAV to stay consistent
+- **Speech start:** press Enter if speech begins at 0s
+- **Language:** press Enter for `auto` detect, or type `Spanish` / `es`
+
+First run installs whisper.cpp and downloads the medium model (~1.5 GB).  
+Output: `public/captions.json`
+
+### Step 4 — Preview in Remotion Studio
+
+```bash
+bun run dev
+# same as: npx remotion studio
+```
+
+### Transcription prerequisites (Linux / WSL)
+
+Whisper.cpp is compiled from source on first run. Install build tools first:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake
+```
 
 ## How do I render my video?
 
@@ -41,16 +116,17 @@ You can generate the captions or supply a .srt file or a .json file that follows
 
 - With the built-in transcription script using [`@remotion/install-whisper-cpp`](https://www.remotion.dev/docs/install-whisper-cpp/):
 
-  ```console
-  bun transcribe.ts
+  ```bash
+  bun run transcribe
   # With Node.js: `npx tsx transcribe.ts`
   ```
 
   This will:
 
-  - Ask for your audio file path (supports any ffmpeg format)
+  - Ask for your audio file path (supports any ffmpeg format, including mislabeled Opus/Ogg)
   - Ask for the speech start time (to avoid false triggers from background music, intro jingles or noise)
-  - Generate captions.json in the public folder
+  - Ask for language (default: `auto` detect; e.g. `Spanish`, `es`, `English`)
+  - Generate `public/captions.json`
 
 - Alternatively, use [`@remotion/openai-whisper`](https://www.remotion.dev/docs/openai-whisper/openai-whisper-api-to-captions) to get captions from OpenAI Whisper into the right shape.
 

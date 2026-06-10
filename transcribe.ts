@@ -14,6 +14,7 @@ import * as readline from "readline";
 
 const SPEECH_START_SECONDS_DEFAULT = 0;
 const DEFAULT_AUDIO_PATH = "./public/dialogue.wav";
+const DEFAULT_LANGUAGE: Language = "auto";
 
 interface TranscriptionOptions {
   audioPath: string;
@@ -44,9 +45,15 @@ async function askQuestions(
     ? parseFloat(speechStartStr)
     : SPEECH_START_SECONDS_DEFAULT;
 
+  const languageInput = await question(
+    `❓ Language (default: ${DEFAULT_LANGUAGE}, or e.g. Spanish, English, es): `,
+  );
+  const language = (languageInput || DEFAULT_LANGUAGE) as Language;
+
   return {
     audioPath,
     speechStartsAtSecond,
+    language,
   };
 }
 
@@ -81,7 +88,7 @@ async function transcribeAudio(options: TranscriptionOptions) {
     whisperPath: WHISPER_PATH,
     inputPath: tempAudioForWhisper,
     tokenLevelTimestamps: true,
-    language: options.language || "English",
+    language: options.language ?? DEFAULT_LANGUAGE,
     whisperCppVersion: WHISPER_VERSION,
   });
 
