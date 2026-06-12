@@ -95,7 +95,9 @@ async function convertAudio(options: ConvertAudioOptions) {
     return { inputPath, outputPath, converted: false };
   }
 
-  if (inputPath === outputPath) {
+  const replaceInPlace = inputPath === outputPath;
+
+  if (replaceInPlace) {
     const backupPath = backupOriginal(inputPath);
     console.info(`Backed up original to ${backupPath}`);
   }
@@ -105,17 +107,36 @@ async function convertAudio(options: ConvertAudioOptions) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
+  // FFmpeg cannot read and write the same path — use a temp .wav when replacing in place
+  const outputStem = path.basename(outputPath, path.extname(outputPath));
+  const ffmpegOutputPath = replaceInPlace
+    ? path.join(outputDir, `${outputStem}.converting.wav`)
+    : outputPath;
+
   console.info(
     `Converting ${inputPath} (${format}) → ${outputPath} (${sampleRate} Hz mono PCM WAV)`,
   );
 
-  execSync(
-    `npx remotion ffmpeg -i "${inputPath}" -ar ${sampleRate} -ac 1 -c:a pcm_s16le "${outputPath}" -y`,
-    { stdio: "inherit" },
-  );
+  try {
+    execSync(
+      `npx remotion ffmpeg -i "${inputPath}" -ar ${sampleRate} -ac 1 -c:a pcm_s16le "${ffmpegOutputPath}" -y`,
+      { stdio: "inherit" },
+    );
 
-  if (!isPcmWav(outputPath)) {
-    throw new Error(`Conversion failed: ${outputPath} is not a valid PCM WAV file.`);
+    if (!isPcmWav(ffmpegOutputPath)) {
+      throw new Error(
+        `Conversion failed: ${ffmpegOutputPath} is not a valid PCM WAV file.`,
+      );
+    }
+
+    if (replaceInPlace) {
+      fs.renameSync(ffmpegOutputPath, outputPath);
+    }
+  } catch (error) {
+    if (fs.existsSync(ffmpegOutputPath)) {
+      fs.unlinkSync(ffmpegOutputPath);
+    }
+    throw error;
   }
 
   console.info(`Done. Remotion-ready audio: ${outputPath}`);

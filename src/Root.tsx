@@ -20,9 +20,9 @@ export const RemotionRoot: React.FC = () => {
           audioOffsetInSeconds: 0,
           audioFileUrl: staticFile("dialogue.wav"),
           // podcast data
-          coverImageUrl: staticFile("podcast-cover.jpeg"),
-          titleText: "Ep 550 - Supper Club × Remotion React",
-          titleColor: "rgba(186, 186, 186, 0.93)",
+          coverImageUrl: staticFile("podcast-cover.png"),
+          titleText: "Tad Scritchfield - welcome to your transformation",
+          titleColor: "#ffffff",
           // captions settings
           captions: null,
           captionsFileName: staticFile("captions.json"),
@@ -30,13 +30,12 @@ export const RemotionRoot: React.FC = () => {
           captionsTextColor: "rgba(255, 255, 255, 0.93)",
           // visualizer settings
           visualizer: {
-            type: "oscilloscope",
-            color: "#F4B941",
+            type: "spectrum",
+            color: "#fd9408",
             numberOfSamples: "64" as const,
-            windowInSeconds: 0.1,
-            posterization: 3,
-            amplitude: 4,
-            padding: 50,
+            mirrorWave: false,
+            linesToDisplay: 65,
+            freqRangeStartIndex: 0,
           },
         }}
         // Determine the length of the video based on the duration of the audio file
