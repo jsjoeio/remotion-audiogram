@@ -39,7 +39,8 @@
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc",
     "convert-audio": "bun convert-audio.ts",
-    "transcribe": "bun transcribe.ts"
+    "transcribe": "bun transcribe.ts",
+    "shift-captions": "bun shift-captions.ts"
   },
   "sideEffects": [
     "*.css"

@@ -75,9 +75,10 @@ bun run transcribe
 
 Prompts:
 
-- **Audio path:** press Enter (default `./public/dialogue.wav`) — transcription accepts Opus/Ogg too, but use the converted WAV to stay consistent
-- **Speech start:** press Enter if speech begins at 0s
+- **Audio path:** press Enter (default `./public/dialogue.wav`)
+- **Speech start:** it now auto-detects the moment real speech begins (using `silencedetect`). It prints the detected value (e.g. 0.116) and uses it as default. Override only if needed.
 - **Language:** press Enter for `auto` detect, or type `Spanish` / `es`
+- **Additional caption sync offset:** new! Enter a number like `-0.12` (negative) if after previewing you feel the text appears behind the words. This is a fast way to nudge timing. Leave at 0 for first run.
 
 First run installs whisper.cpp and downloads the medium model (~1.5 GB).  
 Output: `public/captions.json`
@@ -123,10 +124,25 @@ You can generate the captions or supply a .srt file or a .json file that follows
 
   This will:
 
-  - Ask for your audio file path (supports any ffmpeg format, including mislabeled Opus/Ogg)
-  - Ask for the speech start time (to avoid false triggers from background music, intro jingles or noise)
-  - Ask for language (default: `auto` detect; e.g. `Spanish`, `es`, `English`)
+  - Ask for your audio file path
+  - Auto-detect when actual speech begins in the audio (via ffmpeg silencedetect) so you rarely need to guess the "start second"
+  - Ask for language
+  - Ask for an optional extra sync offset in seconds (e.g. -0.1) — use this to quickly correct "text feels behind" without re-running the expensive transcription
   - Generate `public/captions.json`
+
+**Fast timing tweaks (no re-transcribe):**
+
+If the captions are slightly out of sync with the voice after previewing in Studio:
+
+```bash
+# Advance all text by 120ms (makes words appear earlier)
+bun run shift-captions -0.12
+
+# Or interactive
+bun run shift-captions
+```
+
+This instantly edits `public/captions.json`. Remotion Studio will hot-reload the updated timings. Much faster than changing the start-second and re-transcribing.
 
 - Alternatively, use [`@remotion/openai-whisper`](https://www.remotion.dev/docs/openai-whisper/openai-whisper-api-to-captions) to get captions from OpenAI Whisper into the right shape.
 
