@@ -40,7 +40,9 @@
     "lint": "eslint src && tsc",
     "convert-audio": "bun convert-audio.ts",
     "transcribe": "bun transcribe.ts",
-    "shift-captions": "bun shift-captions.ts"
+    "shift-captions": "bun shift-captions.ts",
+    "render": "remotion render Audiogram out/audiogram.mp4 --crf=28",
+    "render:phone": "remotion render Audiogram out/audiogram-phone.mp4 --video-bitrate=200k --audio-bitrate=96k"
   },
   "sideEffects": [
     "*.css"
