@@ -33,6 +33,45 @@ type ClientEntry = {
   language: Language;
 };
 
+type StepTiming = {
+  name: string;
+  ms: number;
+};
+
+/** Human-readable duration, e.g. "842ms", "12.3s", "1m 24s". */
+function formatDuration(ms: number): string {
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins}m ${secs}s`;
+}
+
+async function timed<T>(
+  name: string,
+  fn: () => T | Promise<T>,
+): Promise<{ result: T; timing: StepTiming }> {
+  const start = performance.now();
+  const result = await fn();
+  const ms = performance.now() - start;
+  return { result, timing: { name, ms } };
+}
+
+function printTimingSummary(timings: StepTiming[], totalMs: number) {
+  console.log("\n⏱  Timing");
+  console.log("────────────────────────────");
+  for (const { name, ms } of timings) {
+    console.log(`  ${name.padEnd(12)} ${formatDuration(ms)}`);
+  }
+  console.log("────────────────────────────");
+  console.log(`  ${"Total".padEnd(12)} ${formatDuration(totalMs)}`);
+}
+
 function question(rl: readline.Interface, query: string): Promise<string> {
   return new Promise((resolve) => {
     rl.question(query, resolve);
@@ -149,38 +188,60 @@ async function runPodcast() {
     // Close stdin prompts before long-running work (ffmpeg / whisper / render).
     rl.close();
 
+    const pipelineStart = performance.now();
+    const timings: StepTiming[] = [];
+
     // 1. Convert audio → public/dialogue.wav (defaults: 48kHz mono PCM)
     const inputPath = resolveInputAudio();
     console.info(`\n🔊 Step 1/3 — Convert audio`);
     console.info(`   Input: ${inputPath}`);
-    await convertAudio({
-      inputPath,
-      outputPath: OUTPUT_WAV,
-      sampleRate: DEFAULT_SAMPLE_RATE,
-    });
+    {
+      const { timing } = await timed("Convert", () =>
+        convertAudio({
+          inputPath,
+          outputPath: OUTPUT_WAV,
+          sampleRate: DEFAULT_SAMPLE_RATE,
+        }),
+      );
+      timings.push(timing);
+      console.info(`   ⏱  Convert done in ${formatDuration(timing.ms)}`);
+    }
 
     // 2. Transcribe with client language + auto-detected speech start
     console.info(`\n📝 Step 2/3 — Transcribe`);
     console.info(
       "   Detecting when speech begins (ffmpeg silencedetect)...",
     );
-    const speechStartsAtSecond = await detectSpeechStart(OUTPUT_WAV);
-    console.info(`   → Speech begins at ${speechStartsAtSecond}s`);
-    console.info(`   Language: ${client.language}`);
+    {
+      const { timing } = await timed("Transcribe", async () => {
+        const speechStartsAtSecond = await detectSpeechStart(OUTPUT_WAV);
+        console.info(`   → Speech begins at ${speechStartsAtSecond}s`);
+        console.info(`   Language: ${client.language}`);
 
-    await transcribeAudio({
-      audioPath: OUTPUT_WAV,
-      speechStartsAtSecond,
-      language: client.language,
-      captionOffsetInSeconds: DEFAULT_CAPTION_OFFSET_SECONDS,
-    });
+        await transcribeAudio({
+          audioPath: OUTPUT_WAV,
+          speechStartsAtSecond,
+          language: client.language,
+          captionOffsetInSeconds: DEFAULT_CAPTION_OFFSET_SECONDS,
+        });
+      });
+      timings.push(timing);
+      console.info(`   ⏱  Transcribe done in ${formatDuration(timing.ms)}`);
+    }
 
     // 3. Render phone-optimized video with dynamic title (no Root.tsx edit)
     console.info(`\n🎥 Step 3/3 — Render`);
-    renderPhone(titleText);
+    {
+      const { timing } = await timed("Render", () => renderPhone(titleText));
+      timings.push(timing);
+      console.info(`   ⏱  Render done in ${formatDuration(timing.ms)}`);
+    }
+
+    const totalMs = performance.now() - pipelineStart;
 
     console.log("\n✅ Done.");
     console.log(`   Video: ${RENDER_OUTPUT}`);
+    printTimingSummary(timings, totalMs);
   } catch (error) {
     // Ensure readline is closed on early failure during prompts.
     try {
