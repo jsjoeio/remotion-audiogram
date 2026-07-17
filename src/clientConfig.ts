@@ -9,4 +9,8 @@ export const CLIENT_CONFIG: Record<string, ClientConfig> = {
         fullName: "Tim Gailey",
         language: "en",
     },
+    "Matt": {
+        fullName: "Matt Vaccaro",
+        language: "en",
+    }
 };
