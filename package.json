@@ -43,6 +43,7 @@
     "transcribe": "bun transcribe.ts",
     "shift-captions": "bun shift-captions.ts",
     "podcast": "bun podcast.ts",
+    "upload-telegram": "bun upload-telegram.ts",
     "render": "remotion render Audiogram out/audiogram.mp4 --crf=28",
     "render:phone": "remotion render Audiogram out/audiogram-phone.mp4 --video-bitrate=200k --audio-bitrate=96k"
   },
