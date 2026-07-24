@@ -26,12 +26,13 @@
   },
   "devDependencies": {
     "@remotion/eslint-config-flat": "4.0.475",
+    "@types/node": "20.12.14",
     "@types/react": "19.2.7",
     "@types/web": "0.0.166",
     "eslint": "9.19.0",
     "prettier": "3.8.1",
     "typescript": "5.9.3",
-    "@types/node": "20.12.14"
+    "wrangler": "^4.114.0"
   },
   "scripts": {
     "dev": "remotion studio",
@@ -42,6 +43,7 @@
     "transcribe": "bun transcribe.ts",
     "shift-captions": "bun shift-captions.ts",
     "podcast": "bun podcast.ts",
+    "upload-telegram": "bun upload-telegram.ts",
     "render": "remotion render Audiogram out/audiogram.mp4 --crf=28",
     "render:phone": "remotion render Audiogram out/audiogram-phone.mp4 --video-bitrate=200k --audio-bitrate=96k"
   },

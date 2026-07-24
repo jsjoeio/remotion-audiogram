@@ -17,6 +17,9 @@ tmp/
 public/*
 !public/.gitkeep
 
+# Latest podcast job pulled from R2 (meta + working copies)
+.cache/
+
 # Windows/WSL download metadata (e.g. files saved from Telegram in Chrome)
 *:Zone.Identifier
 
