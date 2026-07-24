@@ -14,6 +14,7 @@ import {
   detectSpeechStart,
   transcribeAudio,
 } from "./transcribe";
+import { uploadVideoToTelegram } from "./upload-telegram";
 
 const PUBLIC_DIR = "./public";
 const OUTPUT_WAV = path.join(PUBLIC_DIR, "dialogue.wav");
@@ -109,7 +110,7 @@ async function runPodcast() {
   const timings: StepTiming[] = [];
 
   // 0. Pull latest meta + audio from Cloudflare R2
-  console.info(`☁  Step 0/4 — Download from R2`);
+  console.info(`☁  Step 0/5 — Download from R2`);
   const { result: job, timing: fetchTiming } = await timed("Download", () =>
     fetchLatestPodcastJob({
       audioDestDir: PUBLIC_DIR,
@@ -136,7 +137,7 @@ async function runPodcast() {
   console.log("────────────────────────────\n");
 
   // 1. Convert audio → public/dialogue.wav (defaults: 48kHz mono PCM)
-  console.info(`\n🔊 Step 1/4 — Convert audio`);
+  console.info(`\n🔊 Step 1/5 — Convert audio`);
   console.info(`   Input: ${audioLocalPath}`);
   {
     const { timing } = await timed("Convert", () =>
@@ -151,7 +152,7 @@ async function runPodcast() {
   }
 
   // 2. Transcribe with client language + auto-detected speech start
-  console.info(`\n📝 Step 2/4 — Transcribe`);
+  console.info(`\n📝 Step 2/5 — Transcribe`);
   console.info(
     "   Detecting when speech begins (ffmpeg silencedetect)...",
   );
@@ -173,7 +174,7 @@ async function runPodcast() {
   }
 
   // 3. Render phone-optimized video with dynamic title (no Root.tsx edit)
-  console.info(`\n🎥 Step 3/4 — Render`);
+  console.info(`\n🎥 Step 3/5 — Render`);
   {
     const { timing } = await timed("Render", () =>
       renderPhone(titleText, renderOutput),
@@ -182,12 +183,26 @@ async function runPodcast() {
     console.info(`   ⏱  Render done in ${formatDuration(timing.ms)}`);
   }
 
+  // 4. DM yourself the finished MP4 via Telegram bot
+  console.info(`\n📤 Step 4/5 — Upload to Telegram`);
+  {
+    const { timing } = await timed("Telegram", () =>
+      uploadVideoToTelegram({
+        filePath: renderOutput,
+        caption: titleText,
+      }),
+    );
+    timings.push(timing);
+    console.info(`   ⏱  Telegram done in ${formatDuration(timing.ms)}`);
+  }
+
   const totalMs = performance.now() - pipelineStart;
 
   console.log("\n✅ Done.");
   console.log(`   Client:  ${meta.clientFullName}`);
   console.log(`   Podcast: ${meta.podcastTitle}`);
   console.log(`   Video:   ${renderOutput}`);
+  console.log(`   Sent:    Telegram DM`);
   printTimingSummary(timings, totalMs);
 }
 
