@@ -7,23 +7,41 @@ bun install
 bun run dev          # Remotion Studio
 ```
 
-**Privacy:** `public/` is gitignored — audio, captions, and cover stay local.
+**Privacy:** `public/` and `.cache/` are gitignored — audio, captions, cover, and R2 job meta stay local.
 
 ---
 
-## Workflow: Telegram audio → video
+## Workflow: Telegram → R2 → video
 
-The template expects `public/dialogue.wav` (see `src/Root.tsx`). Telegram downloads are usually Opus-in-Ogg even if named `.wav`.
+Voice notes go to the Telegram bot ([jsjoe.io](https://github.com/jsjoeio/jsjoe.io) `telegram-webhook`), which stores audio + metadata in R2 (`telegram-voice`). This repo pulls the latest job and renders.
+
+### One-shot pipeline
+
+```bash
+npx wrangler login   # once per machine
+bun run podcast      # download latest → convert → transcribe → render
+```
+
+What `bun run podcast` does:
+
+1. **Download** — list `meta/` in R2, pull newest metadata + audio (via Wrangler)
+2. **Convert** — `public/dialogue.ogg` → `public/dialogue.wav`
+3. **Transcribe** — Whisper with language from meta / `clientConfig`
+4. **Render** — phone-optimized MP4 named `out/{client}-{title}.mp4`
+
+Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name and podcast title are printed from R2 (no interactive prompts).
+
+**Auth:** Wrangler OAuth (`wrangler login`) is enough locally. Optionally set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
+### Manual / step-by-step
 
 | Step | Command | Notes |
 | --- | --- | --- |
-| 1. Download | — | Save to `public/dialogue.wav` (or `.ogg`) |
-| 2. Convert | `bun run convert-audio` | Backs up original, writes real PCM WAV. Verify: `file public/dialogue.wav` → `WAVE audio` |
-| 3. Transcribe | `bun run transcribe` | First run installs whisper.cpp + ~1.5 GB model. Output: `public/captions.json` |
+| 1. Download | (pipeline does this) | Or save audio yourself to `public/dialogue.ogg` |
+| 2. Convert | `bun run convert-audio` | Backs up original, writes real PCM WAV |
+| 3. Transcribe | `bun run transcribe` | First run installs whisper.cpp + ~1.5 GB model |
 | 4. Preview | `bun run dev` | Tweak props in Studio sidebar or `src/Root.tsx` |
-| 5. Render | `bun run render:phone` | Small file, iMessage-safe (see below) |
-
-**Transcribe prompts:** audio path (Enter for default), speech start (auto-detected), language (`auto` or `es`), optional sync offset.
+| 5. Render | `bun run render:phone` | Default path `out/audiogram-phone.mp4` |
 
 **Linux/WSL first-time transcribe:**
 
