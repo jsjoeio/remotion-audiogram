@@ -18,8 +18,9 @@ Voice notes go to the Telegram bot ([jsjoe.io](https://github.com/jsjoeio/jsjoe.
 ### One-shot pipeline
 
 ```bash
-npx wrangler login   # once per machine
-bun run podcast      # download latest → convert → transcribe → render
+npx wrangler login   # once per machine (R2 downloads)
+cp .env.example .env # fill TELEGRAM_BOT_TOKEN + ALLOWED_TELEGRAM_USER_ID
+bun run podcast      # download → convert → transcribe → render → Telegram DM
 ```
 
 What `bun run podcast` does:
@@ -28,10 +29,20 @@ What `bun run podcast` does:
 2. **Convert** — `public/dialogue.ogg` → `public/dialogue.wav`
 3. **Transcribe** — Whisper with language from meta / `clientConfig`
 4. **Render** — phone-optimized MP4 named `out/{client}-{title}.mp4`
+5. **Telegram** — send the MP4 to your DM with the bot
 
 Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name and podcast title are printed from R2 (no interactive prompts).
 
-**Auth:** Wrangler OAuth (`wrangler login`) is enough locally. Optionally set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+**Cloudflare auth:** Wrangler OAuth (`wrangler login`) is enough locally. Optionally set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
+**Telegram auth:** same env vars as `jsjoe.io` telegram-webhook — `TELEGRAM_BOT_TOKEN` and `ALLOWED_TELEGRAM_USER_ID` in `.env` (see `.env.example`).
+
+Re-send the latest (or a specific) video without re-running the pipeline:
+
+```bash
+bun run upload-telegram
+bun run upload-telegram out/tim-gailey-hola-joe.mp4
+```
 
 ### Manual / step-by-step
 
@@ -42,6 +53,7 @@ Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name an
 | 3. Transcribe | `bun run transcribe` | First run installs whisper.cpp + ~1.5 GB model |
 | 4. Preview | `bun run dev` | Tweak props in Studio sidebar or `src/Root.tsx` |
 | 5. Render | `bun run render:phone` | Default path `out/audiogram-phone.mp4` |
+| 6. Telegram | `bun run upload-telegram` | DM yourself the MP4 |
 
 **Linux/WSL first-time transcribe:**
 
