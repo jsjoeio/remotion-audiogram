@@ -2,8 +2,22 @@
 
 **Status:** research only — do not implement yet  
 **Date:** 2026-08-01  
-**Repo:** [jsjoeio/remotion-audiogram](https://github.com/jsjoeio/remotion-audiogram)  
-**Related:** `jsjoe.io` Worker `workers/telegram-webhook/`
+**Repo (Phase 0):** [jsjoeio/remotion-audiogram](https://github.com/jsjoeio/remotion-audiogram)  
+**Repo (Phase 1):** [jsjoeio/jsjoe.io](https://github.com/jsjoeio/jsjoe.io) — Worker `workers/telegram-webhook/`
+
+### In scope
+
+| Phase | Repo | PR | What |
+| --- | --- | --- | --- |
+| **0** | `remotion-audiogram` | PR A | GitHub Actions workflow + secrets; manual `workflow_dispatch` |
+| **1** | `jsjoe.io` | PR B | Telegram bot calls GitHub API after meta save |
+
+Phases are **separate PRs in different repos**. Ship 0, use it, then do 1.
+
+### Out of scope (for now)
+
+- Targeting a specific meta key instead of “latest”
+- Polish (failure notifications, concurrency tuning, self-hosted runners, smaller Whisper models)
 
 ---
 
@@ -19,7 +33,7 @@ Today the loop is:
 Target:
 
 1–2 stay the same, then **CI runs `bun run podcast` without touching the laptop**.  
-Trigger: manual (`workflow_dispatch`) first; later automatic from the Telegram bot after meta is saved.
+Trigger: manual (`workflow_dispatch`) first (Phase 0); then automatic from the Telegram bot after meta is saved (Phase 1).
 
 ---
 
@@ -69,10 +83,7 @@ Authorization: Bearer <GITHUB_TOKEN_WITH_ACTIONS_WRITE>
 Accept: application/vnd.github+json
 
 {
-  "ref": "main",
-  "inputs": {
-    "meta_key": "meta/voice/123/.../....json"   // optional later
-  }
+  "ref": "main"
 }
 ```
 
@@ -110,14 +121,10 @@ await fetch(
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "jsjoeio-telegram-webhook",
     },
-    body: JSON.stringify({
-      ref: "main",
-      inputs: {
-        meta_key: saved.key, // requires pipeline support; see below
-      },
-    }),
+    body: JSON.stringify({ ref: "main" }),
   },
 );
+// CI uses fetchLatestPodcastJob (newest meta) — enough for Phase 0/1
 ```
 
 **Worker secrets to add (later):**
@@ -179,17 +186,9 @@ Local footprint today: `whisper.cpp` ≈ **1.6 GB** (almost all model). GitHub A
 
 **Do not** commit `whisper.cpp/` or models to git (already gitignored — keep it that way).
 
-### Optional later: “warm cache” workflow
-
-Scheduled weekly `workflow_dispatch` / `schedule` that only installs whisper + saves cache so the first real podcast of the week is not cold. Nice-to-have, not day one.
-
 ### When multi-job would make sense (not now)
 
-- Switch to GPU runners / external Whisper API  
-- Remotion Lambda / cloud render separate from transcription  
-- Queue many podcasts in parallel  
-
-For personal volume (a few clips/week), single job is enough.
+Out of scope. For personal volume (a few clips/week), single job is enough.
 
 ---
 
@@ -201,17 +200,7 @@ File: `.github/workflows/podcast.yml`
 name: Podcast pipeline
 
 on:
-  workflow_dispatch:
-    inputs:
-      # Optional later: pin a specific R2 meta key instead of "latest"
-      meta_key:
-        description: "R2 meta key (empty = latest)"
-        required: false
-        type: string
-
-# Optional phase 2:
-# repository_dispatch:
-#   types: [podcast_meta_saved]
+  workflow_dispatch:   # manual UI / gh / Phase 1 bot POST
 
 jobs:
   podcast:
@@ -276,9 +265,12 @@ Validate on the first dry run; adjust only if render fails.
 
 ---
 
-## 6. Code changes required (phases)
+## 6. In-scope phases (two PRs, two repos)
 
-### Phase 0 — Manual CI only (smallest useful ship)
+### Phase 0 — Manual CI (`remotion-audiogram` only)
+
+**PR in:** this repo (`remotion-audiogram`)  
+**Does not touch** `jsjoe.io`.
 
 1. Add `.github/workflows/podcast.yml` as above.  
 2. Repo secrets: `TELEGRAM_BOT_TOKEN`, `ALLOWED_TELEGRAM_USER_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.  
@@ -286,34 +278,31 @@ Validate on the first dry run; adjust only if render fails.
 4. Smoke: Actions UI → Run workflow → wait for Telegram DM.  
 5. Document in README: “CI: Run podcast workflow”.  
 
-**No bot changes.** You still type client/title in Telegram, then click Run workflow (or `gh workflow run`).
+**No bot changes.** You still type client/title in Telegram, then click Run workflow (or `gh workflow run`). Pipeline keeps using **latest** meta from R2.
 
-### Phase 1 — Bot triggers Actions
+### Phase 1 — Bot triggers Actions (`jsjoe.io` only)
+
+**PR in:** `jsjoe.io` (`workers/telegram-webhook/`)  
+**Depends on:** Phase 0 merged so `podcast.yml` exists on `main`.  
+**Does not change** the pipeline code in `remotion-audiogram` (unless a tiny README note).
 
 1. Create fine-grained PAT (or GitHub App) with Actions write on `remotion-audiogram`.  
 2. Worker secret `GITHUB_PAT` (+ maybe `GITHUB_REPO=jsjoeio/remotion-audiogram`).  
-3. After `putPodcastMeta` succeeds, POST `workflow_dispatch`.  
+3. After `putPodcastMeta` succeeds, POST `workflow_dispatch` (no inputs; CI still uses latest meta).  
 4. Bot reply: “Render kicked off” (+ optional link).  
 5. Failures: if GitHub returns non-2xx, reply with error so you notice (do not roll back R2 meta).  
 
-### Phase 2 — Target specific job (optional)
+---
 
-Today `fetchLatestPodcastJob` always takes **newest** meta. That races if you save two metas before CI starts.
+## Out of scope (not doing now)
 
-Improvements:
+These were considered and parked. Do **not** include them in Phase 0 or 1 PRs.
 
-- Accept `meta_key` env / CLI arg / workflow input.  
-- `podcast.ts` + `r2-podcast.ts`: if `META_KEY` set, fetch that object instead of “latest”.  
-- Bot passes `saved.key` in dispatch inputs.  
-
-Do this before high volume or concurrent clips.
-
-### Phase 3 — Polish (optional)
-
-- Notify Telegram on CI failure (workflow step calling Bot API, or bot polling — overkill; artifact + email may be enough).  
-- Concurrency: `concurrency: { group: podcast, cancel-in-progress: false }` so two jobs queue instead of canceling.  
-- Self-hosted runner on your always-on machine if GitHub minutes or CPU time hurt.  
-- Smaller Whisper model in CI (`small` / `base`) if quality allows and minutes matter.  
+| Idea | Why parked |
+| --- | --- |
+| `meta_key` workflow input + fetch-by-key in `podcast.ts` | Only matters if concurrent jobs race on “latest”; personal volume is fine |
+| CI failure → Telegram notify, concurrency groups, self-hosted runners | Polish after 0+1 work |
+| Smaller Whisper model in CI | Optimize minutes later if needed |
 
 ---
 
@@ -340,13 +329,13 @@ Do this before high volume or concurrent clips.
 
 | Risk | Mitigation |
 | --- | --- |
-| Cold whisper = long first run | Cache `whisper.cpp`; optional warm-cache workflow |
+| Cold whisper = long first run | Cache `whisper.cpp` |
 | GHA cache size / eviction | ~1.5 GB model is fine for personal use; pin key by version |
-| “Latest meta” race | Phase 2 `meta_key` input |
+| Two metas before CI starts | Accept “latest” for now; avoid overlapping jobs until volume grows |
 | Remotion Chrome missing libs | First-run fix; `remotion browser ensure` |
 | Runner timeout on long audio | `timeout-minutes: 180`; watch billable minutes |
 | Private media in logs | Don’t `cat` audio; keep `public/` out of commits (already) |
-| PAT leak | Worker secrets only; rotate if exposed |
+| PAT leak (Phase 1) | Worker secrets only; rotate if exposed |
 | Telegram 50 MB video limit | Already enforced in `upload-telegram.ts`; phone bitrate keeps ~7 MB clips fine |
 | Minutes on free/private plan | One job ~10–40 min warm; monitor usage |
 
@@ -356,21 +345,30 @@ Do this before high volume or concurrent clips.
 
 | Question | Answer |
 | --- | --- |
-| API-start a workflow? | **Yes** — `workflow_dispatch` POST (preferred) or `repository_dispatch` |
-| From Telegram bot? | **Yes** — after `putPodcastMeta`, Worker calls GitHub with a PAT |
-| One step vs split? | **One job**, many setup/cache steps, single `bun run podcast`. Cache whisper + bun. Split jobs only if you outgrow serial CI. |
-| First implementation? | Phase 0 only: workflow + secrets + manual dispatch. Bot wiring later. |
+| API-start a workflow? | **Yes** — `workflow_dispatch` POST |
+| From Telegram bot? | **Yes (Phase 1)** — after `putPodcastMeta`, Worker calls GitHub with a PAT |
+| One step vs split? | **One job**, many setup/cache steps, single `bun run podcast`. Cache whisper + bun. |
+| In scope? | **Phase 0 then Phase 1 only** — different repos, different PRs |
+| Out of scope? | meta_key targeting, polish, model/runner optimizations |
 
 ---
 
-## 10. Suggested implementation order (next session)
+## 10. Suggested implementation order
+
+### PR A — Phase 0 (`remotion-audiogram`)
 
 1. [ ] Create Cloudflare R2 read token + account id; store as GH secrets  
 2. [ ] Add `.github/workflows/podcast.yml`  
-3. [ ] Manual `workflow_dispatch` smoke test end-to-end  
-4. [ ] Fix Chrome/cmake issues if any; confirm cache hits on 2nd run  
-5. [ ] (Phase 1) PAT + Worker dispatch after meta save  
-6. [ ] (Phase 2) `META_KEY` / workflow input so CI is not “latest only”  
-7. [ ] README: automated path documented  
+3. [ ] README: manual “Run podcast workflow”  
+4. [ ] Manual `workflow_dispatch` smoke test end-to-end  
+5. [ ] Fix Chrome/cmake issues if any; confirm cache hits on 2nd run  
+6. [ ] Merge PR A  
 
-No code changes in this session — this document is the plan.
+### PR B — Phase 1 (`jsjoe.io`) — after A is on main
+
+1. [ ] Fine-grained PAT with Actions write on `remotion-audiogram`  
+2. [ ] Worker secret `GITHUB_PAT`  
+3. [ ] After `putPodcastMeta`, POST `workflow_dispatch`  
+4. [ ] Bot reply on success/failure  
+5. [ ] Smoke: voice → `N title` → Actions run → Telegram video  
+6. [ ] Merge PR B 
