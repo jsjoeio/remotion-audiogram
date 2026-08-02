@@ -39,19 +39,47 @@ Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name an
 
 ### CI: Run podcast workflow (GitHub Actions)
 
-After a voice note + `N <title>` are saved to R2, you can render **without your laptop**:
+After a voice note + `N <title>` are saved to R2, you can render **without your laptop**.
+
+CI does **not** compile whisper.cpp (that path is for local `bun run podcast` only). On Actions we use the Marketplace Docker action [appleboy/whisper-action](https://github.com/marketplace/actions/speech-to-text-openai-whisper) (prebuilt whisper.cpp) → SRT → `captions.json` → Remotion → Telegram.
 
 1. Repo **Settings → Secrets and variables → Actions** — add:
    - `TELEGRAM_BOT_TOKEN`
    - `ALLOWED_TELEGRAM_USER_ID`
    - `CLOUDFLARE_API_TOKEN` (R2 read on bucket `telegram-voice`: list + get)
    - `CLOUDFLARE_ACCOUNT_ID`
-2. **Actions → Podcast pipeline → Run workflow**  
-   or: `gh workflow run podcast.yml`
-3. Wait for the job (first run is slow: Whisper model ~1.5 GB + cmake build; later runs use cache).
-4. Finished MP4 arrives in your Telegram DM (same as local `bun run podcast`).
+2. Run the workflow (see below).
+3. Finished MP4 arrives in your Telegram DM.
 
 The workflow always pulls the **latest** meta in R2. Workflow file: [`.github/workflows/podcast.yml`](.github/workflows/podcast.yml).
+
+#### How to run without merging to `main`
+
+GitHub only *lists* `workflow_dispatch` workflows that exist on the **default branch**. Once that file is on `main` (it is), you can run **any branch’s code** without merging:
+
+```bash
+# Use source + workflow YAML from a feature branch (no merge required)
+gh workflow run podcast.yml \
+  --ref joe/podcast-ci-whisper-action \
+  -R jsjoeio/remotion-audiogram
+
+# Watch
+gh run list -R jsjoeio/remotion-audiogram --workflow=podcast.yml
+gh run watch -R jsjoeio/remotion-audiogram
+```
+
+Also auto-runs on push to branches matching `joe/podcast-ci/**` (handy while iterating on the workflow itself).
+
+UI: **Actions → Podcast pipeline → Run workflow** → pick the branch in the branch dropdown.
+
+#### Local helpers used by CI
+
+| Script | Role |
+| --- | --- |
+| `bun run podcast:prepare` | R2 download + convert → `public/dialogue.wav` |
+| `bun run srt-to-captions` | `public/captions.srt` → `public/captions.json` |
+| `bun run podcast:finish` | Render + Telegram (expects captions already present) |
+| `bun run podcast` | Full local path (still uses whisper.cpp + medium model) |
 
 Re-send the latest (or a specific) video without re-running the pipeline:
 

@@ -1,7 +1,19 @@
-# Phase 0: run the full podcast pipeline on demand.
-# Trigger: Actions UI → "Podcast pipeline" → Run workflow
-#        or: gh workflow run podcast.yml
-# Secrets required (repo Settings → Secrets and variables → Actions):
+# Podcast pipeline (CI) — no local whisper.cpp / cmake.
+#
+# Why not bun run podcast end-to-end?
+#   Local uses @remotion/install-whisper-cpp (git clone + make + ~1.5GB model).
+#   On Actions that is slow and fragile. Instead we use the prebuilt Docker
+#   action appleboy/whisper-action (same idea as Marketplace "Speech to Text
+#   OpenAI Whisper"), then convert SRT → captions.json and render with Remotion.
+#
+# Trigger without merging to main
+#   1) workflow_dispatch must exist on the default branch (already true).
+#   2) Run code FROM a feature branch:
+#        gh workflow run podcast.yml --ref joe/podcast-ci-whisper-action -R jsjoeio/remotion-audiogram
+#      GitHub uses the workflow + source at that ref; no need to push to main.
+#   3) Optional: push to branch matching joe/podcast-ci/** auto-runs (below).
+#
+# Secrets (repo Settings → Secrets and variables → Actions):
 #   TELEGRAM_BOT_TOKEN
 #   ALLOWED_TELEGRAM_USER_ID
 #   CLOUDFLARE_API_TOKEN   (R2 read on bucket telegram-voice)
@@ -11,27 +23,30 @@ name: Podcast pipeline
 
 on:
   workflow_dispatch:
+  # Test workflow changes without merging to main: push to a ci branch.
+  push:
+    branches:
+      - "joe/podcast-ci/**"
 
 jobs:
   podcast:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: System deps (cmake for whisper, Chrome libs for Remotion)
+      # Chrome/Remotion only — no cmake / build-essential (Whisper is Docker).
+      - name: System deps (Chrome libs for Remotion)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential \
-            cmake \
             libnss3 \
             libdbus-1-3 \
             libatk1.0-0 \
             libgbm-dev \
-            libasound2 \
+            libasound2t64 \
             libxrandr2 \
             libxkbcommon-dev \
             libxfixes3 \
@@ -55,27 +70,40 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
 
-      - name: Cache whisper.cpp + model
-        uses: actions/cache@v4
-        with:
-          path: whisper.cpp
-          key: whisper-1.7.4-medium-${{ runner.os }}
-          restore-keys: |
-            whisper-1.7.4-medium-
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Ensure Remotion browser
         run: npx remotion browser ensure
 
-      - name: Run podcast pipeline
+      # R2 → public/dialogue.* + public/dialogue.wav + .cache/meta
+      - name: Prepare (download R2 + convert audio)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bun run podcast:prepare
+
+      # Prebuilt whisper.cpp in Docker — no compile, models pulled inside image.
+      # https://github.com/marketplace/actions/speech-to-text-openai-whisper
+      - name: Transcribe with whisper-action
+        uses: appleboy/whisper-action@v0.1.1
+        with:
+          model: medium
+          audio_path: public/dialogue.wav
+          output_folder: public
+          output_filename: captions
+          output_format: srt
+          print_progress: true
+
+      - name: SRT → captions.json
+        run: bun run srt-to-captions
+
+      # Render + Telegram (captions already on disk; no local whisper)
+      - name: Finish (render + Telegram)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bun run podcast
+        run: bun run podcast:finish
 
       - name: Upload debug artifacts on failure
         if: failure()
@@ -83,6 +111,7 @@ jobs:
         with:
           name: podcast-debug
           path: |
+            public/captions.srt
             public/captions.json
             out/
           if-no-files-found: ignore

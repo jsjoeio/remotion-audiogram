@@ -292,6 +292,21 @@ export async function fetchLatestPodcastJob(options?: {
   };
 }
 
+/**
+ * Load meta written by a previous fetchLatestPodcastJob (e.g. CI prepare step).
+ * Does not hit R2.
+ */
+export function loadCachedPodcastMeta(): PodcastMeta {
+  if (!fs.existsSync(LOCAL_META_PATH)) {
+    throw new Error(
+      `No cached meta at ${LOCAL_META_PATH}. Run download/prepare first.`,
+    );
+  }
+  return parsePodcastMeta(
+    JSON.parse(fs.readFileSync(LOCAL_META_PATH, "utf8")),
+  );
+}
+
 /** Filesystem-safe slug: "Tim Gailey" + "Hola Joe" → "tim-gailey-hola-joe" */
 export function slugifyFilename(...parts: string[]): string {
   return parts
