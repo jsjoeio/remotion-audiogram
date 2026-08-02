@@ -13,9 +13,11 @@ whisper.cpp
 # Transcription temp files
 tmp/
 
-# Local media assets (audio, captions, covers) — keep private, not on GitHub
+# Local media assets (audio, captions) — keep private, not on GitHub
 public/*
 !public/.gitkeep
+# Shared branding used by Remotion (required in CI; not client audio)
+!public/podcast-cover.png
 
 # Latest podcast job pulled from R2 (meta + working copies)
 .cache/
