@@ -1,6 +1,6 @@
 # Plan: Automate podcast pipeline with GitHub Actions
 
-**Status:** Phase 0 implementing / in PR  
+**Status:** Phase 0 on main; follow-up PR uses whisper-action (no cmake)  
 **Date:** 2026-08-01 (updated 2026-08-02)  
 **Repo (Phase 0):** [jsjoeio/remotion-audiogram](https://github.com/jsjoeio/remotion-audiogram)  
 **Repo (Phase 1):** [jsjoeio/jsjoe.io](https://github.com/jsjoeio/jsjoe.io) — Worker `workers/telegram-webhook/`

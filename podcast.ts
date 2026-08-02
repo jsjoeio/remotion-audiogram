@@ -7,6 +7,7 @@ import { convertAudio } from "./convert-audio";
 import { CLIENT_CONFIG } from "./src/clientConfig";
 import {
   fetchLatestPodcastJob,
+  loadCachedPodcastMeta,
   slugifyFilename,
   type PodcastMeta,
 } from "./r2-podcast";
@@ -18,6 +19,7 @@ import { uploadVideoToTelegram } from "./upload-telegram";
 
 const PUBLIC_DIR = "./public";
 const OUTPUT_WAV = path.join(PUBLIC_DIR, "dialogue.wav");
+const CAPTIONS_JSON = path.join(PUBLIC_DIR, "captions.json");
 const DEFAULT_SAMPLE_RATE = 48_000;
 const DEFAULT_CAPTION_OFFSET_SECONDS = 0;
 
@@ -25,6 +27,9 @@ type StepTiming = {
   name: string;
   ms: number;
 };
+
+/** CLI modes: full (default), prepare (CI pre-whisper), finish (CI post-whisper). */
+type Mode = "full" | "prepare" | "finish";
 
 /** Human-readable duration, e.g. "842ms", "12.3s", "1m 24s". */
 function formatDuration(ms: number): string {
@@ -103,14 +108,20 @@ function renderPhone(titleText: string, renderOutput: string) {
   }
 }
 
-async function runPodcast() {
-  console.log("🎙  Podcast pipeline\n");
+function parseMode(argv: string[]): Mode {
+  const arg = argv[2];
+  if (arg === "prepare" || arg === "finish" || arg === "full") {
+    return arg;
+  }
+  if (arg && !arg.startsWith("-")) {
+    console.error(`Unknown mode "${arg}". Use: full | prepare | finish`);
+    process.exit(1);
+  }
+  return "full";
+}
 
-  const pipelineStart = performance.now();
-  const timings: StepTiming[] = [];
-
-  // 0. Pull latest meta + audio from Cloudflare R2
-  console.info(`☁  Step 0/5 — Download from R2`);
+async function stepDownloadConvert(timings: StepTiming[]) {
+  console.info(`☁  Step — Download from R2`);
   const { result: job, timing: fetchTiming } = await timed("Download", () =>
     fetchLatestPodcastJob({
       audioDestDir: PUBLIC_DIR,
@@ -136,8 +147,7 @@ async function runPodcast() {
   console.log(`Output:   ${renderOutput}`);
   console.log("────────────────────────────\n");
 
-  // 1. Convert audio → public/dialogue.wav (defaults: 48kHz mono PCM)
-  console.info(`\n🔊 Step 1/5 — Convert audio`);
+  console.info(`\n🔊 Step — Convert audio`);
   console.info(`   Input: ${audioLocalPath}`);
   {
     const { timing } = await timed("Convert", () =>
@@ -151,11 +161,15 @@ async function runPodcast() {
     console.info(`   ⏱  Convert done in ${formatDuration(timing.ms)}`);
   }
 
-  // 2. Transcribe with client language + auto-detected speech start
-  console.info(`\n📝 Step 2/5 — Transcribe`);
-  console.info(
-    "   Detecting when speech begins (ffmpeg silencedetect)...",
-  );
+  return { meta, language, titleText, renderOutput };
+}
+
+async function stepTranscribeLocal(
+  language: Language,
+  timings: StepTiming[],
+) {
+  console.info(`\n📝 Step — Transcribe (local whisper.cpp)`);
+  console.info("   Detecting when speech begins (ffmpeg silencedetect)...");
   {
     const { timing } = await timed("Transcribe", async () => {
       const speechStartsAtSecond = await detectSpeechStart(OUTPUT_WAV);
@@ -172,9 +186,24 @@ async function runPodcast() {
     timings.push(timing);
     console.info(`   ⏱  Transcribe done in ${formatDuration(timing.ms)}`);
   }
+}
 
-  // 3. Render phone-optimized video with dynamic title (no Root.tsx edit)
-  console.info(`\n🎥 Step 3/5 — Render`);
+async function stepRenderUpload(
+  titleText: string,
+  renderOutput: string,
+  meta: PodcastMeta,
+  timings: StepTiming[],
+) {
+  if (!fs.existsSync(CAPTIONS_JSON)) {
+    throw new Error(
+      `Missing ${CAPTIONS_JSON}. Transcribe first (local) or run srt-to-captions (CI).`,
+    );
+  }
+  if (!fs.existsSync(OUTPUT_WAV)) {
+    throw new Error(`Missing ${OUTPUT_WAV}. Run prepare/convert first.`);
+  }
+
+  console.info(`\n🎥 Step — Render`);
   {
     const { timing } = await timed("Render", () =>
       renderPhone(titleText, renderOutput),
@@ -183,8 +212,7 @@ async function runPodcast() {
     console.info(`   ⏱  Render done in ${formatDuration(timing.ms)}`);
   }
 
-  // 4. DM yourself the finished MP4 via Telegram bot
-  console.info(`\n📤 Step 4/5 — Upload to Telegram`);
+  console.info(`\n📤 Step — Upload to Telegram`);
   {
     const { timing } = await timed("Telegram", () =>
       uploadVideoToTelegram({
@@ -196,18 +224,54 @@ async function runPodcast() {
     console.info(`   ⏱  Telegram done in ${formatDuration(timing.ms)}`);
   }
 
-  const totalMs = performance.now() - pipelineStart;
-
   console.log("\n✅ Done.");
   console.log(`   Client:  ${meta.clientFullName}`);
   console.log(`   Podcast: ${meta.podcastTitle}`);
   console.log(`   Video:   ${renderOutput}`);
   console.log(`   Sent:    Telegram DM`);
-  printTimingSummary(timings, totalMs);
+}
+
+async function runPodcast(mode: Mode = "full") {
+  console.log(`🎙  Podcast pipeline (mode: ${mode})\n`);
+
+  const pipelineStart = performance.now();
+  const timings: StepTiming[] = [];
+
+  if (mode === "prepare") {
+    await stepDownloadConvert(timings);
+    const totalMs = performance.now() - pipelineStart;
+    console.log("\n✅ Prepare done (audio ready for Whisper).");
+    console.log(`   WAV: ${OUTPUT_WAV}`);
+    printTimingSummary(timings, totalMs);
+    return;
+  }
+
+  if (mode === "finish") {
+    const meta = loadCachedPodcastMeta();
+    const titleText = `${meta.clientFullName} - ${meta.podcastTitle}`;
+    const renderOutput = resolveOutputPath(meta);
+    console.log("\n────────────────────────────");
+    console.log(`Client:   ${meta.clientKey} (${meta.clientFullName})`);
+    console.log(`Title:    ${meta.podcastTitle}`);
+    console.log(`Captions: ${CAPTIONS_JSON}`);
+    console.log(`Output:   ${renderOutput}`);
+    console.log("────────────────────────────\n");
+    await stepRenderUpload(titleText, renderOutput, meta, timings);
+    printTimingSummary(timings, performance.now() - pipelineStart);
+    return;
+  }
+
+  // full — local path with whisper.cpp
+  const { meta, language, titleText, renderOutput } =
+    await stepDownloadConvert(timings);
+  await stepTranscribeLocal(language, timings);
+  await stepRenderUpload(titleText, renderOutput, meta, timings);
+  printTimingSummary(timings, performance.now() - pipelineStart);
 }
 
 if (require.main === module) {
-  runPodcast().catch((err) => {
+  const mode = parseMode(process.argv);
+  runPodcast(mode).catch((err) => {
     console.error("\n❌ Podcast pipeline failed:");
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
