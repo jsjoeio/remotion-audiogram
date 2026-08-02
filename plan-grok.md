@@ -116,7 +116,7 @@ await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${env.PODCAST_DISPATCH_TOKEN}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "jsjoeio-telegram-webhook",
@@ -131,7 +131,7 @@ await fetch(
 
 | Secret | Purpose |
 | --- | --- |
-| `GITHUB_PAT` | Fine-grained PAT: target repo **Actions: Read and write** (Contents: Read if needed) |
+| `PODCAST_DISPATCH_TOKEN` | Fine-grained PAT: target repo **Actions: Read and write** (Contents: Read if needed) |
 
 **Reply UX (nice-to-have):** after 204/success, bot says “🎬 Rendering started on GitHub Actions” with a link if you also fetch the latest run URL (optional; dispatch alone is fire-and-forget).
 
@@ -287,7 +287,7 @@ Validate on the first dry run; adjust only if render fails.
 **Does not change** the pipeline code in `remotion-audiogram` (unless a tiny README note).
 
 1. Create fine-grained PAT (or GitHub App) with Actions write on `remotion-audiogram`.  
-2. Worker secret `GITHUB_PAT` (+ maybe `GITHUB_REPO=jsjoeio/remotion-audiogram`).  
+2. Worker secret `PODCAST_DISPATCH_TOKEN` (+ maybe `GITHUB_REPO=jsjoeio/remotion-audiogram`).  
 3. After `putPodcastMeta` succeeds, POST `workflow_dispatch` (no inputs; CI still uses latest meta).  
 4. Bot reply: “Render kicked off” (+ optional link).  
 5. Failures: if GitHub returns non-2xx, reply with error so you notice (do not roll back R2 meta).  
@@ -321,7 +321,7 @@ These were considered and parked. Do **not** include them in Phase 0 or 1 PRs.
 
 | Secret | Source |
 | --- | --- |
-| `GITHUB_PAT` | Fine-grained PAT for `jsjoeio/remotion-audiogram` |
+| `PODCAST_DISPATCH_TOKEN` | Fine-grained PAT for `jsjoeio/remotion-audiogram` |
 
 ---
 
@@ -367,7 +367,7 @@ These were considered and parked. Do **not** include them in Phase 0 or 1 PRs.
 ### PR B — Phase 1 (`jsjoe.io`) — after A is on main
 
 1. [ ] Fine-grained PAT with Actions write on `remotion-audiogram`  
-2. [ ] Worker secret `GITHUB_PAT`  
+2. [ ] Worker secret `PODCAST_DISPATCH_TOKEN`  
 3. [ ] After `putPodcastMeta`, POST `workflow_dispatch`  
 4. [ ] Bot reply on success/failure  
 5. [ ] Smoke: voice → `N title` → Actions run → Telegram video  
