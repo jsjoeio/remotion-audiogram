@@ -37,6 +37,22 @@ Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name an
 
 **Telegram auth:** same env vars as `jsjoe.io` telegram-webhook — `TELEGRAM_BOT_TOKEN` and `ALLOWED_TELEGRAM_USER_ID` in `.env` (see `.env.example`).
 
+### CI: Run podcast workflow (GitHub Actions)
+
+After a voice note + `N <title>` are saved to R2, you can render **without your laptop**:
+
+1. Repo **Settings → Secrets and variables → Actions** — add:
+   - `TELEGRAM_BOT_TOKEN`
+   - `ALLOWED_TELEGRAM_USER_ID`
+   - `CLOUDFLARE_API_TOKEN` (R2 read on bucket `telegram-voice`: list + get)
+   - `CLOUDFLARE_ACCOUNT_ID`
+2. **Actions → Podcast pipeline → Run workflow**  
+   or: `gh workflow run podcast.yml`
+3. Wait for the job (first run is slow: Whisper model ~1.5 GB + cmake build; later runs use cache).
+4. Finished MP4 arrives in your Telegram DM (same as local `bun run podcast`).
+
+The workflow always pulls the **latest** meta in R2. Workflow file: [`.github/workflows/podcast.yml`](.github/workflows/podcast.yml).
+
 Re-send the latest (or a specific) video without re-running the pipeline:
 
 ```bash
