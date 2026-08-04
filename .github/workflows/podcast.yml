@@ -6,10 +6,17 @@
 #   action appleboy/whisper-action (same idea as Marketplace "Speech to Text
 #   OpenAI Whisper"), then convert SRT → captions.json and render with Remotion.
 #
+# Optimization: cache ggml-medium on the host (~1.5GB). The action entrypoint
+# skips Hugging Face if models/ggml-medium.bin already exists. Measured:
+#   - Cache restore of model: ~30s
+#   - Fresh HF download: ~2.5 min
+# The action's own "Build …" step (~2.5 min, docker pull of go-whisper) is
+# unpaid for on hosted runners; caching the image as a tar did not beat it.
+#
 # Trigger without merging to main
 #   1) workflow_dispatch must exist on the default branch (already true).
 #   2) Run code FROM a feature branch:
-#        gh workflow run podcast.yml --ref joe/podcast-ci-whisper-action -R jsjoeio/remotion-audiogram
+#        gh workflow run podcast.yml --ref joe/optimize-pipeline -R jsjoeio/remotion-audiogram
 #      GitHub uses the workflow + source at that ref; no need to push to main.
 #   3) Optional: push to branch matching joe/podcast-ci/** auto-runs (below).
 #
@@ -27,6 +34,9 @@ on:
   push:
     branches:
       - "joe/podcast-ci/**"
+
+env:
+  WHISPER_MODEL: medium
 
 jobs:
   podcast:
@@ -70,6 +80,13 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
 
+      # Host-side model; whisper-action entrypoint skips HF if this file exists.
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: whisper-ggml-${{ env.WHISPER_MODEL }}-v1
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -83,7 +100,25 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bun run podcast:prepare
 
-      # Prebuilt whisper.cpp in Docker — no compile, models pulled inside image.
+      # Pre-seed so appleboy entrypoint does not re-download (~1.5GB) every run.
+      - name: Ensure Whisper model
+        run: |
+          set -euo pipefail
+          mkdir -p models
+          model_file="models/ggml-${WHISPER_MODEL}.bin"
+          if [ -f "$model_file" ]; then
+            echo "Model already present: $model_file"
+            ls -lh "$model_file"
+            exit 0
+          fi
+          echo "Downloading ggml-${WHISPER_MODEL}.bin…"
+          curl -L --fail --retry 3 --retry-delay 5 \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin" \
+            -o "$model_file"
+          ls -lh "$model_file"
+
+      # Prebuilt whisper.cpp in Docker — still rebuilds the thin action image
+      # each job (~2.5 min); model is already on disk when entrypoint runs.
       # https://github.com/marketplace/actions/speech-to-text-openai-whisper
       - name: Transcribe with whisper-action
         uses: appleboy/whisper-action@v0.1.1

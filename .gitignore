@@ -27,3 +27,6 @@ public/*
 
 # Bun is the package manager for this project
 package-lock.json
+
+# Whisper models downloaded in CI (cached via actions/cache)
+models/

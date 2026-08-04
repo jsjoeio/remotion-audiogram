@@ -43,6 +43,8 @@ After a voice note + `N <title>` are saved to R2, you can render **without your 
 
 CI does **not** compile whisper.cpp (that path is for local `bun run podcast` only). On Actions we use the Marketplace Docker action [appleboy/whisper-action](https://github.com/marketplace/actions/speech-to-text-openai-whisper) (prebuilt whisper.cpp) → SRT → `captions.json` → Remotion → Telegram.
 
+The `ggml-medium` model (~1.5 GB) is **cached** in Actions so warm runs skip the Hugging Face download (~2.5 min cold → ~30 s cache restore). The action’s own Docker rebuild (~2.5 min each job) is hard to beat on hosted runners.
+
 1. Repo **Settings → Secrets and variables → Actions** — add:
    - `TELEGRAM_BOT_TOKEN`
    - `ALLOWED_TELEGRAM_USER_ID`
