@@ -2,14 +2,19 @@
 #
 # Why not bun run podcast end-to-end?
 #   Local uses @remotion/install-whisper-cpp (git clone + make + ~1.5GB model).
-#   On Actions that is slow and fragile. Instead we use the prebuilt Docker
-#   action appleboy/whisper-action (same idea as Marketplace "Speech to Text
-#   OpenAI Whisper"), then convert SRT → captions.json and render with Remotion.
+#   On Actions that is slow and fragile. Instead we run the prebuilt
+#   ghcr.io/appleboy/go-whisper image (same binary as appleboy/whisper-action),
+#   then convert SRT → captions.json and render with Remotion.
+#
+# Why not uses: appleboy/whisper-action?
+#   That is a Docker *container action* (image: Dockerfile). GitHub rebuilds it
+#   at job start ("Build appleboy/whisper-action…") — ~2.5 min every run, before
+#   checkout. We docker pull/load go-whisper ourselves and cache image + model.
 #
 # Trigger without merging to main
 #   1) workflow_dispatch must exist on the default branch (already true).
 #   2) Run code FROM a feature branch:
-#        gh workflow run podcast.yml --ref joe/podcast-ci-whisper-action -R jsjoeio/remotion-audiogram
+#        gh workflow run podcast.yml --ref joe/optimize-pipeline -R jsjoeio/remotion-audiogram
 #      GitHub uses the workflow + source at that ref; no need to push to main.
 #   3) Optional: push to branch matching joe/podcast-ci/** auto-runs (below).
 #
@@ -27,6 +32,11 @@ on:
   push:
     branches:
       - "joe/podcast-ci/**"
+
+env:
+  # Pin: same base as appleboy/whisper-action@v0.1.1 (Dockerfile FROM …:1.3.0)
+  GO_WHISPER_IMAGE: ghcr.io/appleboy/go-whisper:1.3.0
+  WHISPER_MODEL: medium
 
 jobs:
   podcast:
@@ -70,6 +80,19 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
 
+      - name: Cache go-whisper Docker image
+        id: cache-go-whisper-image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/go-whisper-image.tar
+          key: go-whisper-image-${{ runner.os }}-1.3.0
+
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: whisper-ggml-${{ env.WHISPER_MODEL }}-v1
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -83,17 +106,49 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bun run podcast:prepare
 
-      # Prebuilt whisper.cpp in Docker — no compile, models pulled inside image.
-      # https://github.com/marketplace/actions/speech-to-text-openai-whisper
-      - name: Transcribe with whisper-action
-        uses: appleboy/whisper-action@v0.1.1
-        with:
-          model: medium
-          audio_path: public/dialogue.wav
-          output_folder: public
-          output_filename: captions
-          output_format: srt
-          print_progress: true
+      # Load cached image or pull once; save tar for next run (avoids action rebuild).
+      - name: Load or pull go-whisper image
+        run: |
+          set -euo pipefail
+          if [ -f /tmp/go-whisper-image.tar ]; then
+            echo "Loading go-whisper image from cache…"
+            docker load -i /tmp/go-whisper-image.tar
+          else
+            echo "Pulling ${GO_WHISPER_IMAGE}…"
+            docker pull "${GO_WHISPER_IMAGE}"
+            docker save "${GO_WHISPER_IMAGE}" -o /tmp/go-whisper-image.tar
+          fi
+
+      # Host-side model cache mounted into the container (same URLs as whisper-action entrypoint).
+      - name: Ensure Whisper model
+        run: |
+          set -euo pipefail
+          mkdir -p models
+          model_file="models/ggml-${WHISPER_MODEL}.bin"
+          if [ -f "$model_file" ]; then
+            echo "Model already present: $model_file"
+            ls -lh "$model_file"
+            exit 0
+          fi
+          echo "Downloading ggml-${WHISPER_MODEL}.bin…"
+          curl -L --fail --retry 3 --retry-delay 5 \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin" \
+            -o "$model_file"
+          ls -lh "$model_file"
+
+      - name: Transcribe with go-whisper
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/models:/app/models:ro" \
+            -v "$PWD/public:/app/public" \
+            "${GO_WHISPER_IMAGE}" \
+            --model "/app/models/ggml-${WHISPER_MODEL}.bin" \
+            --audio-path /app/public/dialogue.wav \
+            --output-folder /app/public \
+            --output-filename captions \
+            --output-format srt \
+            --print-progress true
 
       - name: SRT → captions.json
         run: bun run srt-to-captions
