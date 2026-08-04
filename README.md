@@ -41,7 +41,7 @@ Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name an
 
 After a voice note + `N <title>` are saved to R2, you can render **without your laptop**.
 
-CI does **not** compile whisper.cpp (that path is for local `bun run podcast` only). On Actions we use the Marketplace Docker action [appleboy/whisper-action](https://github.com/marketplace/actions/speech-to-text-openai-whisper) (prebuilt whisper.cpp) → SRT → `captions.json` → Remotion → Telegram.
+CI does **not** compile whisper.cpp (that path is for local `bun run podcast` only). On Actions we run the prebuilt [`ghcr.io/appleboy/go-whisper`](https://github.com/appleboy/go-whisper) image (same stack as [whisper-action](https://github.com/marketplace/actions/speech-to-text-openai-whisper)), with **cached** Docker image + `ggml-medium` model so we skip the ~2.5 min action rebuild and re-download on every run → SRT → `captions.json` → Remotion → Telegram.
 
 1. Repo **Settings → Secrets and variables → Actions** — add:
    - `TELEGRAM_BOT_TOKEN`
@@ -60,7 +60,7 @@ GitHub only *lists* `workflow_dispatch` workflows that exist on the **default br
 ```bash
 # Use source + workflow YAML from a feature branch (no merge required)
 gh workflow run podcast.yml \
-  --ref joe/podcast-ci-whisper-action \
+  --ref joe/optimize-pipeline \
   -R jsjoeio/remotion-audiogram
 
 # Watch
