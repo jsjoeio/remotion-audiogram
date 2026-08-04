@@ -2,14 +2,16 @@
 #
 # Why not bun run podcast end-to-end?
 #   Local uses @remotion/install-whisper-cpp (git clone + make + ~1.5GB model).
-#   On Actions that is slow and fragile. Instead we run the prebuilt
-#   ghcr.io/appleboy/go-whisper image (same binary as appleboy/whisper-action),
-#   then convert SRT → captions.json and render with Remotion.
+#   On Actions that is slow and fragile. Instead we use the prebuilt Docker
+#   action appleboy/whisper-action (same idea as Marketplace "Speech to Text
+#   OpenAI Whisper"), then convert SRT → captions.json and render with Remotion.
 #
-# Why not uses: appleboy/whisper-action?
-#   That is a Docker *container action* (image: Dockerfile). GitHub rebuilds it
-#   at job start ("Build appleboy/whisper-action…") — ~2.5 min every run, before
-#   checkout. We docker pull/load go-whisper ourselves and cache image + model.
+# Optimization: cache ggml-medium on the host (~1.5GB). The action entrypoint
+# skips Hugging Face if models/ggml-medium.bin already exists. Measured:
+#   - Cache restore of model: ~30s
+#   - Fresh HF download: ~2.5 min
+# The action's own "Build …" step (~2.5 min, docker pull of go-whisper) is
+# unpaid for on hosted runners; caching the image as a tar did not beat it.
 #
 # Trigger without merging to main
 #   1) workflow_dispatch must exist on the default branch (already true).
@@ -34,8 +36,6 @@ on:
       - "joe/podcast-ci/**"
 
 env:
-  # Pin: same base as appleboy/whisper-action@v0.1.1 (Dockerfile FROM …:1.3.0)
-  GO_WHISPER_IMAGE: ghcr.io/appleboy/go-whisper:1.3.0
   WHISPER_MODEL: medium
 
 jobs:
@@ -80,13 +80,7 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
 
-      - name: Cache go-whisper Docker image
-        id: cache-go-whisper-image
-        uses: actions/cache@v4
-        with:
-          path: /tmp/go-whisper-image.tar
-          key: go-whisper-image-${{ runner.os }}-1.3.0
-
+      # Host-side model; whisper-action entrypoint skips HF if this file exists.
       - name: Cache Whisper model
         uses: actions/cache@v4
         with:
@@ -106,20 +100,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bun run podcast:prepare
 
-      # Load cached image or pull once; save tar for next run (avoids action rebuild).
-      - name: Load or pull go-whisper image
-        run: |
-          set -euo pipefail
-          if [ -f /tmp/go-whisper-image.tar ]; then
-            echo "Loading go-whisper image from cache…"
-            docker load -i /tmp/go-whisper-image.tar
-          else
-            echo "Pulling ${GO_WHISPER_IMAGE}…"
-            docker pull "${GO_WHISPER_IMAGE}"
-            docker save "${GO_WHISPER_IMAGE}" -o /tmp/go-whisper-image.tar
-          fi
-
-      # Host-side model cache mounted into the container (same URLs as whisper-action entrypoint).
+      # Pre-seed so appleboy entrypoint does not re-download (~1.5GB) every run.
       - name: Ensure Whisper model
         run: |
           set -euo pipefail
@@ -136,19 +117,18 @@ jobs:
             -o "$model_file"
           ls -lh "$model_file"
 
-      - name: Transcribe with go-whisper
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            -v "$PWD/models:/app/models:ro" \
-            -v "$PWD/public:/app/public" \
-            "${GO_WHISPER_IMAGE}" \
-            --model "/app/models/ggml-${WHISPER_MODEL}.bin" \
-            --audio-path /app/public/dialogue.wav \
-            --output-folder /app/public \
-            --output-filename captions \
-            --output-format srt \
-            --print-progress true
+      # Prebuilt whisper.cpp in Docker — still rebuilds the thin action image
+      # each job (~2.5 min); model is already on disk when entrypoint runs.
+      # https://github.com/marketplace/actions/speech-to-text-openai-whisper
+      - name: Transcribe with whisper-action
+        uses: appleboy/whisper-action@v0.1.1
+        with:
+          model: medium
+          audio_path: public/dialogue.wav
+          output_folder: public
+          output_filename: captions
+          output_format: srt
+          print_progress: true
 
       - name: SRT → captions.json
         run: bun run srt-to-captions
