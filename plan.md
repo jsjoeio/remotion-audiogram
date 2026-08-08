@@ -1,19 +1,25 @@
-ahora estoy listo para el próximo paso de automatizar el proceso de crear un
-podcast.
+# Contexto
 
-en este momento tenemos el podcast script. pero ahora el proceso es:
-1. grabar podcST y mandar al bot de telegram
-2. ir a mi compu, hacer bun run podcast
+recién creamos el workflow de github para crear los podcasts. parece un poco
+diferente al workflow del script local de bun run podcast que usamos.
 
-entonces quiero que agregamos un github workflow con la habilidad de 
-hacer workflow dispatch 
+algo que noté es que los subtítulos parecen un poco no alineados con el audio.
 
-preguntas abierta:
-1. se puede inciar un github workflow por un API request? (como del telegram bot
-   como un side effect? podés ver el telegram handler en ../jsjoe.io/workers/telegram-webhook/)
-2. vale la pena hacer una acción entera como "bun run podcast" o vale la pena
-   separar las acciones en el github worklow? me imagino separar para poder
-cache el whisper build? pero no sé.
+me pregunto si podemos arreglar el workflow de github y abrir un PR? 
 
-podés investgar y escribir un plan-grok.md acá? no lo implementamos hoy,
-escribílo en inglés acá en esta carpeta. lo hacemos otro día.
+no hace falta correr el workflow solo quiero que compares los dos workflows para
+identificar el problema. en nuestro script primero detectamos cuando empieza el
+audio y usamos eso en el flow de whisper. quizás necesitamos hacer lo mismo con
+el github action que estámos usando?
+
+## Fix (implemented)
+
+**Causa:** local recorta el silencio inicial antes de Whisper y re-suma ese
+offset a los captions; CI mandaba el WAV completo a whisper-action y no
+desplazaba el SRT.
+
+**Cambio:**
+1. `podcast:prepare` — `detectSpeechStart` + `.cache/dialogue-whisper.wav` +
+   `.cache/speech-start.json`
+2. workflow — `audio_path: .cache/dialogue-whisper.wav`
+3. `srt-to-captions` — shift por el offset de speech-start (igual que local)

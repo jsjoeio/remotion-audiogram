@@ -13,7 +13,9 @@ import {
 } from "./r2-podcast";
 import {
   detectSpeechStart,
+  prepareWhisperInput,
   transcribeAudio,
+  WHISPER_INPUT_WAV,
 } from "./transcribe";
 import { uploadVideoToTelegram } from "./upload-telegram";
 
@@ -239,9 +241,28 @@ async function runPodcast(mode: Mode = "full") {
 
   if (mode === "prepare") {
     await stepDownloadConvert(timings);
+
+    // Same speech-start trim as local transcribe: Whisper gets a clean clip;
+    // srt-to-captions shifts SRT times back onto the full dialogue.wav timeline.
+    console.info(`\n✂️  Step — Prepare Whisper input (detect speech + trim)`);
+    {
+      const { result, timing } = await timed("Whisper prep", async () => {
+        const { speechStartsAtSecond, whisperInputPath } =
+          await prepareWhisperInput(OUTPUT_WAV);
+        console.info(`   → Speech begins at ${speechStartsAtSecond}s`);
+        console.info(`   → Whisper input: ${whisperInputPath}`);
+        return { speechStartsAtSecond, whisperInputPath };
+      });
+      timings.push(timing);
+      console.info(
+        `   ⏱  Whisper prep done in ${formatDuration(timing.ms)} (speech @ ${result.speechStartsAtSecond}s)`,
+      );
+    }
+
     const totalMs = performance.now() - pipelineStart;
     console.log("\n✅ Prepare done (audio ready for Whisper).");
-    console.log(`   WAV: ${OUTPUT_WAV}`);
+    console.log(`   Full WAV (Remotion): ${OUTPUT_WAV}`);
+    console.log(`   Whisper WAV (trimmed): ${WHISPER_INPUT_WAV}`);
     printTimingSummary(timings, totalMs);
     return;
   }
