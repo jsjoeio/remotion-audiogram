@@ -5,14 +5,20 @@
  * Segment-level captions are coarser than local whisper.cpp token timestamps,
  * but Remotion already supports SRT via parseSrt — good enough for CI.
  *
+ * When prepare wrote `.cache/speech-start.json` (trimmed Whisper input), times
+ * in the SRT are relative to speech start — we shift them back so they match
+ * full public/dialogue.wav used by Remotion (same as local transcribe).
+ *
  * Usage:
  *   bun srt-to-captions.ts
  *   bun srt-to-captions.ts public/captions.srt public/captions.json
+ *   bun srt-to-captions.ts public/captions.srt public/captions.json 1.25
  */
 
 import fs from "fs";
 import path from "path";
 import { parseSrt, type Caption } from "@remotion/captions";
+import { loadSpeechStart, shiftCaptions } from "./transcribe";
 
 const DEFAULT_SRT = path.join("public", "captions.srt");
 const DEFAULT_JSON = path.join("public", "captions.json");
@@ -60,6 +66,16 @@ function expandToWords(captions: Caption[]): Caption[] {
 function main() {
   const srtPath = process.argv[2] ?? DEFAULT_SRT;
   const jsonPath = process.argv[3] ?? DEFAULT_JSON;
+  // Optional 3rd arg: override offset. Else load from prepare's speech-start cache.
+  const offsetArg = process.argv[4];
+  const offsetSeconds =
+    offsetArg != null && offsetArg !== ""
+      ? parseFloat(offsetArg)
+      : loadSpeechStart();
+
+  if (offsetArg != null && offsetArg !== "" && !Number.isFinite(offsetSeconds)) {
+    throw new Error(`Invalid offset seconds: ${offsetArg}`);
+  }
 
   if (!fs.existsSync(srtPath)) {
     throw new Error(`SRT not found: ${srtPath}`);
@@ -73,7 +89,16 @@ function main() {
   }
 
   // parseSrt cues are usually full lines; expand for Word.tsx highlighting.
-  const wordCaptions = expandToWords(captions);
+  let wordCaptions = expandToWords(captions);
+
+  if (offsetSeconds !== 0) {
+    wordCaptions = shiftCaptions(wordCaptions, offsetSeconds);
+    console.info(
+      `⏱  Shifted captions by +${offsetSeconds}s (speech-start trim → full audio timeline)`,
+    );
+  } else {
+    console.info("⏱  No speech-start offset (0s) — captions unchanged relative to SRT");
+  }
 
   const dir = path.dirname(jsonPath);
   if (!fs.existsSync(dir)) {

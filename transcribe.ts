@@ -16,6 +16,11 @@ const DEFAULT_AUDIO_PATH = "./public/dialogue.wav";
 const DEFAULT_LANGUAGE: Language = "auto";
 const DEFAULT_CAPTION_OFFSET_SECONDS = 0;
 
+/** CI prepare writes this; srt-to-captions reads it to re-align timestamps. */
+const SPEECH_START_CACHE_PATH = path.join(".cache", "speech-start.json");
+/** Trimmed 16 kHz mono WAV for whisper-action (full dialogue.wav stays for Remotion). */
+const WHISPER_INPUT_WAV = path.join(".cache", "dialogue-whisper.wav");
+
 interface TranscriptionOptions {
   audioPath: string;
   speechStartsAtSecond: number;
@@ -88,16 +93,16 @@ async function transcribeAudio(options: TranscriptionOptions) {
     folder: WHISPER_PATH,
   });
 
-  // Create a temporary audio file with the speech start cut out and converted to 16-bit WAV
+  // Cut leading silence for cleaner Whisper input (same approach as CI prepare).
+  // Extra captionOffsetInSeconds is applied only to final caption times (not the cut).
   const tempAudioForWhisper = path.join(
     os.tmpdir(),
     `whisper-${Date.now()}.wav`,
   );
-
-  // Cut the audio starting from speech start time (for clean Whisper input) and convert to 16-bit WAV.
-  // Any extra captionOffsetInSeconds is applied ONLY to final caption times (does not affect the cut).
-  execSync(
-    `npx remotion ffmpeg -i "${options.audioPath}" -ss ${options.speechStartsAtSecond} -ar 16000 -ac 1 "${tempAudioForWhisper}" -y`,
+  cutAudioForWhisper(
+    options.audioPath,
+    options.speechStartsAtSecond,
+    tempAudioForWhisper,
   );
 
   const whisperCppOutput = await transcribe({
@@ -174,6 +179,67 @@ async function detectSpeechStart(audioPath: string): Promise<number> {
   return 0;
 }
 
+/**
+ * Trim from speech start and convert to 16 kHz mono PCM WAV for Whisper.
+ * Matches local remotion/whisper-cpp input prep.
+ */
+function cutAudioForWhisper(
+  audioPath: string,
+  speechStartsAtSecond: number,
+  outputPath: string,
+): void {
+  const dir = path.dirname(outputPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  execSync(
+    `npx remotion ffmpeg -i "${audioPath}" -ss ${speechStartsAtSecond} -ar 16000 -ac 1 -c:a pcm_s16le "${outputPath}" -y`,
+    { stdio: "inherit" },
+  );
+}
+
+function saveSpeechStart(seconds: number): void {
+  const dir = path.dirname(SPEECH_START_CACHE_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(
+    SPEECH_START_CACHE_PATH,
+    JSON.stringify({ seconds }, null, 2) + "\n",
+  );
+}
+
+/** Offset applied in srt-to-captions so SRT times match full dialogue.wav. */
+function loadSpeechStart(): number {
+  if (!fs.existsSync(SPEECH_START_CACHE_PATH)) {
+    return 0;
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(SPEECH_START_CACHE_PATH, "utf-8"));
+    const seconds = Number(raw?.seconds);
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      return 0;
+    }
+    return seconds;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * CI prepare: detect speech start, cache offset, write trimmed Whisper input.
+ * Remotion keeps using full public/dialogue.wav; whisper-action uses the cache WAV.
+ */
+async function prepareWhisperInput(audioPath: string): Promise<{
+  speechStartsAtSecond: number;
+  whisperInputPath: string;
+}> {
+  const speechStartsAtSecond = await detectSpeechStart(audioPath);
+  saveSpeechStart(speechStartsAtSecond);
+  cutAudioForWhisper(audioPath, speechStartsAtSecond, WHISPER_INPUT_WAV);
+  return { speechStartsAtSecond, whisperInputPath: WHISPER_INPUT_WAV };
+}
+
 function shiftCaptions<T extends { startMs: number; endMs: number; timestampMs?: number | null }>(
   captions: T[],
   offsetSeconds: number,
@@ -188,4 +254,15 @@ function shiftCaptions<T extends { startMs: number; endMs: number; timestampMs?:
   }));
 }
 
-export { transcribeAudio, type TranscriptionOptions, detectSpeechStart, shiftCaptions };
+export {
+  transcribeAudio,
+  type TranscriptionOptions,
+  detectSpeechStart,
+  shiftCaptions,
+  cutAudioForWhisper,
+  prepareWhisperInput,
+  loadSpeechStart,
+  saveSpeechStart,
+  SPEECH_START_CACHE_PATH,
+  WHISPER_INPUT_WAV,
+};

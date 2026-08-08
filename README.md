@@ -43,6 +43,8 @@ After a voice note + `N <title>` are saved to R2, you can render **without your 
 
 CI does **not** compile whisper.cpp (that path is for local `bun run podcast` only). On Actions we use the Marketplace Docker action [appleboy/whisper-action](https://github.com/marketplace/actions/speech-to-text-openai-whisper) (prebuilt whisper.cpp) → SRT → `captions.json` → Remotion → Telegram.
 
+**Caption sync (same as local):** prepare detects when speech starts (`ffmpeg` silencedetect), trims a 16 kHz clip for Whisper (`.cache/dialogue-whisper.wav`), and stores the offset in `.cache/speech-start.json`. Remotion still plays full `public/dialogue.wav`. After Whisper, `srt-to-captions` shifts SRT times by that offset so captions line up with the full audio.
+
 The `ggml-medium` model (~1.5 GB) is **cached** in Actions so warm runs skip the Hugging Face download (~2.5 min cold → ~30 s cache restore). The action’s own Docker rebuild (~2.5 min each job) is hard to beat on hosted runners.
 
 1. Repo **Settings → Secrets and variables → Actions** — add:
@@ -78,8 +80,8 @@ UI: **Actions → Podcast pipeline → Run workflow** → pick the branch in the
 
 | Script | Role |
 | --- | --- |
-| `bun run podcast:prepare` | R2 download + convert → `public/dialogue.wav` |
-| `bun run srt-to-captions` | `public/captions.srt` → `public/captions.json` |
+| `bun run podcast:prepare` | R2 download + convert → full `public/dialogue.wav` + trimmed Whisper WAV + speech-start cache |
+| `bun run srt-to-captions` | `public/captions.srt` → `public/captions.json` (shifts by speech-start offset) |
 | `bun run podcast:finish` | Render + Telegram (expects captions already present) |
 | `bun run podcast` | Full local path (still uses whisper.cpp + medium model) |
 

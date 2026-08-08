@@ -93,8 +93,9 @@ jobs:
       - name: Ensure Remotion browser
         run: npx remotion browser ensure
 
-      # R2 → public/dialogue.* + public/dialogue.wav + .cache/meta
-      - name: Prepare (download R2 + convert audio)
+      # R2 → public/dialogue.wav (full, for Remotion) + .cache/dialogue-whisper.wav
+      # (trimmed from speech start, for Whisper) + .cache/speech-start.json
+      - name: Prepare (download R2 + convert + speech-start trim)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -119,17 +120,20 @@ jobs:
 
       # Prebuilt whisper.cpp in Docker — still rebuilds the thin action image
       # each job (~2.5 min); model is already on disk when entrypoint runs.
+      # Use trimmed .cache/dialogue-whisper.wav (same speech-start cut as local
+      # bun run podcast). srt-to-captions re-adds that offset to caption times.
       # https://github.com/marketplace/actions/speech-to-text-openai-whisper
       - name: Transcribe with whisper-action
         uses: appleboy/whisper-action@v0.1.1
         with:
           model: medium
-          audio_path: public/dialogue.wav
+          audio_path: .cache/dialogue-whisper.wav
           output_folder: public
           output_filename: captions
           output_format: srt
           print_progress: true
 
+      # Shifts SRT by .cache/speech-start.json so times match full dialogue.wav
       - name: SRT → captions.json
         run: bun run srt-to-captions
 
@@ -148,6 +152,7 @@ jobs:
           path: |
             public/captions.srt
             public/captions.json
+            .cache/speech-start.json
             out/
           if-no-files-found: ignore
           retention-days: 7
