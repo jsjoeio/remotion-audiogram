@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import type { Language } from "@remotion/install-whisper-cpp";
 import { convertAudio } from "./convert-audio";
-import { CLIENT_CONFIG } from "./src/clientConfig";
+import { getClientByKey } from "./d1-clients";
 import {
   fetchLatestPodcastJob,
   loadCachedPodcastMeta,
@@ -67,11 +67,19 @@ function printTimingSummary(timings: StepTiming[], totalMs: number) {
   console.log(`  ${"Total".padEnd(12)} ${formatDuration(totalMs)}`);
 }
 
-/** Prefer language from R2 meta; fall back to CLIENT_CONFIG if present. */
+/**
+ * Prefer language from D1 clients table (source of truth); fall back to R2 meta.
+ * D1 lookup is best-effort so offline / missing wrangler still works with meta.
+ */
 function resolveLanguage(meta: PodcastMeta): Language {
-  const fromConfig = CLIENT_CONFIG[meta.clientKey]?.language;
-  if (fromConfig) {
-    return fromConfig;
+  try {
+    const fromD1 = getClientByKey(meta.clientKey)?.language;
+    if (fromD1) {
+      return fromD1;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`   ⚠  D1 clients unavailable (${msg}); using meta.language`);
   }
   return meta.language;
 }

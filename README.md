@@ -27,13 +27,19 @@ What `bun run podcast` does:
 
 1. **Download** — list `meta/` in R2, pull newest metadata + audio (via Wrangler)
 2. **Convert** — `public/dialogue.ogg` → `public/dialogue.wav`
-3. **Transcribe** — Whisper with language from meta / `clientConfig`
+3. **Transcribe** — Whisper with language from D1 clients (fallback: R2 meta)
 4. **Render** — phone-optimized MP4 named `out/{client}-{title}.mp4`
 5. **Telegram** — send the MP4 to your DM with the bot
 
 Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name and podcast title are printed from R2 (no interactive prompts).
 
 **Cloudflare auth:** Wrangler OAuth (`wrangler login`) is enough locally. Optionally set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
+**Clients:** roster lives in D1 (`jsjoeio.clients`, same as the Telegram bot). Check without running the full pipeline:
+
+```bash
+bun run clients   # wrangler d1 execute --remote
+```
 
 **Telegram auth:** same env vars as `jsjoe.io` telegram-webhook — `TELEGRAM_BOT_TOKEN` and `ALLOWED_TELEGRAM_USER_ID` in `.env` (see `.env.example`).
 

@@ -45,6 +45,7 @@
     "podcast": "bun podcast.ts",
     "podcast:prepare": "bun podcast.ts prepare",
     "podcast:finish": "bun podcast.ts finish",
+    "clients": "bun d1-clients.ts",
     "srt-to-captions": "bun srt-to-captions.ts",
     "upload-telegram": "bun upload-telegram.ts",
     "render": "remotion render Audiogram out/audiogram.mp4 --crf=28",
