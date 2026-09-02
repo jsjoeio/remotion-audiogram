@@ -4,6 +4,10 @@
  * Same env vars as jsjoe.io workers/telegram-webhook:
  *   TELEGRAM_BOT_TOKEN
  *   ALLOWED_TELEGRAM_USER_ID   (your numeric Telegram user id = chat id for DMs)
+ *   TELEGRAM_GROUP_CHAT_ID     (forum group, e.g. -1001234567890; optional)
+ *
+ * If telegramTopicId is set and TELEGRAM_GROUP_CHAT_ID is present, the video
+ * goes to that topic. Otherwise it DMs you (same as before).
  *
  * Usage:
  *   bun run upload-telegram
@@ -28,6 +32,7 @@ function requireEnv(name: string): string {
       `Missing ${name}. Set it in .env (or the environment), same as the telegram-webhook worker:\n` +
         `  TELEGRAM_BOT_TOKEN=...\n` +
         `  ALLOWED_TELEGRAM_USER_ID=...\n` +
+        `  TELEGRAM_GROUP_CHAT_ID=...  (forum group; needed to post in a topic)\n` +
         `(copy from jsjoe.io/workers/telegram-webhook/.dev.vars if you have it there)`,
     );
   }
@@ -85,7 +90,39 @@ export type UploadTelegramResult = {
   messageId?: number;
   filePath: string;
   bytes: number;
+  chatId: string;
+  messageThreadId?: number;
 };
+
+/** General forum topic — Telegram rejects message_thread_id=1 on send. */
+export const GENERAL_TOPIC_ID = 1;
+
+export type TelegramUploadTarget = {
+  chatId: string;
+  messageThreadId?: number;
+  label: string;
+};
+
+/**
+ * Topic in the coaching group if mapped; otherwise the DM.
+ * Topic 1 (General) is treated as unmapped.
+ */
+export function resolveTelegramUploadTarget(input: {
+  dmChatId: string;
+  groupChatId?: string | null;
+  telegramTopicId?: number | null;
+}): TelegramUploadTarget {
+  const topicId = input.telegramTopicId;
+  const group = input.groupChatId?.trim() || "";
+  if (topicId != null && topicId > GENERAL_TOPIC_ID && group) {
+    return {
+      chatId: group,
+      messageThreadId: topicId,
+      label: `group ${group} topic ${topicId}`,
+    };
+  }
+  return { chatId: input.dmChatId, label: `DM ${input.dmChatId}` };
+}
 
 /**
  * Prefer sendVideo (inline player on phone). Fall back to sendDocument
@@ -94,10 +131,11 @@ export type UploadTelegramResult = {
 async function sendViaTelegram(options: {
   token: string;
   chatId: string;
+  messageThreadId?: number;
   filePath: string;
   caption: string;
 }): Promise<{ method: "sendVideo" | "sendDocument"; messageId?: number }> {
-  const { token, chatId, filePath, caption } = options;
+  const { token, chatId, messageThreadId, filePath, caption } = options;
   const filename = path.basename(filePath);
   const blob = Bun.file(filePath);
 
@@ -107,6 +145,9 @@ async function sendViaTelegram(options: {
   ): Promise<TelegramApiResponse> {
     const form = new FormData();
     form.append("chat_id", chatId);
+    if (messageThreadId != null) {
+      form.append("message_thread_id", String(messageThreadId));
+    }
     form.append(field, blob, filename);
     form.append("caption", caption);
     if (method === "sendVideo") {
@@ -142,17 +183,33 @@ async function sendViaTelegram(options: {
 }
 
 /**
- * Upload an MP4 to your Telegram DM (same bot + user as the webhook worker).
- * Call from the podcast pipeline or via CLI.
+ * Upload an MP4 via the Telegram bot: client's forum topic when mapped,
+ * otherwise the DM (same bot + user as the webhook worker).
  */
 export async function uploadVideoToTelegram(options: {
   filePath: string;
   /** Defaults to the file basename without extension */
   caption?: string;
+  /** Forum topic id from R2 meta; ignored without TELEGRAM_GROUP_CHAT_ID. */
+  telegramTopicId?: number | null;
 }): Promise<UploadTelegramResult> {
   const token = requireEnv("TELEGRAM_BOT_TOKEN");
-  const chatId = requireEnv("ALLOWED_TELEGRAM_USER_ID");
-  const { filePath } = options;
+  const dmChatId = requireEnv("ALLOWED_TELEGRAM_USER_ID");
+  const groupChatId = process.env.TELEGRAM_GROUP_CHAT_ID?.trim() || "";
+  const { filePath, telegramTopicId } = options;
+
+  if (telegramTopicId != null && telegramTopicId > GENERAL_TOPIC_ID && !groupChatId) {
+    console.warn(
+      "   telegramTopicId is set but TELEGRAM_GROUP_CHAT_ID is missing — falling back to DM.",
+    );
+  }
+
+  const target = resolveTelegramUploadTarget({
+    dmChatId,
+    groupChatId,
+    telegramTopicId,
+  });
+  const { chatId, messageThreadId } = target;
 
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
@@ -174,13 +231,14 @@ export async function uploadVideoToTelegram(options: {
   console.log("────────────────────────────");
   console.log(`  File:    ${filePath}`);
   console.log(`  Size:    ${formatBytes(stat.size)}`);
-  console.log(`  Chat:    ${chatId}`);
+  console.log(`  Chat:    ${target.label}`);
   console.log(`  Caption: ${caption}`);
   console.log("────────────────────────────\n");
 
   const { method, messageId } = await sendViaTelegram({
     token,
     chatId,
+    messageThreadId,
     filePath,
     caption,
   });
@@ -188,9 +246,20 @@ export async function uploadVideoToTelegram(options: {
   console.log(
     `✅ Sent via ${method}${messageId != null ? ` (message_id ${messageId})` : ""}`,
   );
-  console.log("   Check your DM with the bot on your phone.");
+  console.log(
+    messageThreadId != null
+      ? "   Check the client's topic in the coaching group."
+      : "   Check your DM with the bot on your phone.",
+  );
 
-  return { method, messageId, filePath, bytes: stat.size };
+  return {
+    method,
+    messageId,
+    filePath,
+    bytes: stat.size,
+    chatId,
+    messageThreadId,
+  };
 }
 
 async function main() {

@@ -223,14 +223,20 @@ async function stepRenderUpload(
   }
 
   console.info(`\n📤 Step — Upload to Telegram`);
+  let sentLabel = "Telegram DM";
   {
-    const { timing } = await timed("Telegram", () =>
+    const { result, timing } = await timed("Telegram", () =>
       uploadVideoToTelegram({
         filePath: renderOutput,
         caption: titleText,
+        telegramTopicId: meta.telegramTopicId,
       }),
     );
     timings.push(timing);
+    sentLabel =
+      result.messageThreadId != null
+        ? `Telegram topic ${result.messageThreadId}`
+        : "Telegram DM";
     console.info(`   ⏱  Telegram done in ${formatDuration(timing.ms)}`);
   }
 
@@ -238,7 +244,7 @@ async function stepRenderUpload(
   console.log(`   Client:  ${meta.clientFullName}`);
   console.log(`   Podcast: ${meta.podcastTitle}`);
   console.log(`   Video:   ${renderOutput}`);
-  console.log(`   Sent:    Telegram DM`);
+  console.log(`   Sent:    ${sentLabel}`);
 }
 
 async function runPodcast(mode: Mode = "full") {

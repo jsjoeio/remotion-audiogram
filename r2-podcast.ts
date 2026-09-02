@@ -27,6 +27,13 @@ export type PodcastMeta = {
   podcastTitle: string;
   audioPath: string;
   createdAt: string;
+  /** D1 primary key. Optional so older R2 meta still parses. */
+  clientId?: number;
+  /**
+   * Forum topic id (`message_thread_id`) in the coaching group.
+   * Null/missing → upload falls back to the Telegram DM.
+   */
+  telegramTopicId?: number | null;
 };
 
 type R2ListObject = {
@@ -204,6 +211,14 @@ export function downloadR2Object(objectKey: string, destPath: string): void {
   }
 }
 
+function optionalInt(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(n)) return null;
+  return n;
+}
+
 function parsePodcastMeta(raw: unknown): PodcastMeta {
   if (!raw || typeof raw !== "object") {
     throw new Error("Podcast meta JSON is not an object.");
@@ -222,7 +237,10 @@ function parsePodcastMeta(raw: unknown): PodcastMeta {
     );
   }
 
-  return {
+  const clientId = optionalInt(o.clientId);
+  const telegramTopicId = optionalInt(o.telegramTopicId);
+
+  const meta: PodcastMeta = {
     clientFullName,
     clientKey,
     language,
@@ -230,6 +248,9 @@ function parsePodcastMeta(raw: unknown): PodcastMeta {
     audioPath,
     createdAt,
   };
+  if (typeof clientId === "number") meta.clientId = clientId;
+  if (telegramTopicId !== undefined) meta.telegramTopicId = telegramTopicId;
+  return meta;
 }
 
 export type FetchedPodcastJob = {

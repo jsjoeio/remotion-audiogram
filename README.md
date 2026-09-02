@@ -20,7 +20,7 @@ Voice notes go to the Telegram bot ([jsjoe.io](https://github.com/jsjoeio/jsjoe.
 ```bash
 npx wrangler login   # once per machine (R2 downloads)
 cp .env.example .env # fill TELEGRAM_BOT_TOKEN + ALLOWED_TELEGRAM_USER_ID
-bun run podcast      # download → convert → transcribe → render → Telegram DM
+bun run podcast      # download → convert → transcribe → render → Telegram topic (or DM)
 ```
 
 What `bun run podcast` does:
@@ -29,7 +29,7 @@ What `bun run podcast` does:
 2. **Convert** — `public/dialogue.ogg` → `public/dialogue.wav`
 3. **Transcribe** — Whisper with language from D1 clients (fallback: R2 meta)
 4. **Render** — phone-optimized MP4 named `out/{client}-{title}.mp4`
-5. **Telegram** — send the MP4 to your DM with the bot
+5. **Telegram** — send the MP4 to the client's forum topic (falls back to your DM if unmapped)
 
 Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name and podcast title are printed from R2 (no interactive prompts).
 
@@ -41,7 +41,7 @@ Meta is cached at `.cache/latest-podcast-meta.json` (gitignored). Client name an
 bun run clients   # wrangler d1 execute --remote
 ```
 
-**Telegram auth:** same env vars as `jsjoe.io` telegram-webhook — `TELEGRAM_BOT_TOKEN` and `ALLOWED_TELEGRAM_USER_ID` in `.env` (see `.env.example`).
+**Telegram auth:** same env vars as `jsjoe.io` telegram-webhook — `TELEGRAM_BOT_TOKEN` and `ALLOWED_TELEGRAM_USER_ID` in `.env` (see `.env.example`). To post in a client topic, also set `TELEGRAM_GROUP_CHAT_ID` (the group's `-100…` id). Topic id comes from R2 meta (`telegramTopicId`), snapshotted by the bot from D1.
 
 ### CI: Run podcast workflow (GitHub Actions)
 
@@ -56,10 +56,11 @@ The `ggml-medium` model (~1.5 GB) is **cached** in Actions so warm runs skip t
 1. Repo **Settings → Secrets and variables → Actions** — add:
    - `TELEGRAM_BOT_TOKEN`
    - `ALLOWED_TELEGRAM_USER_ID`
+   - `TELEGRAM_GROUP_CHAT_ID` (forum group chat_id, e.g. `-1001234567890`)
    - `CLOUDFLARE_API_TOKEN` (R2 read on bucket `telegram-voice`: list + get)
    - `CLOUDFLARE_ACCOUNT_ID`
 2. Run the workflow (see below).
-3. Finished MP4 arrives in your Telegram DM.
+3. Finished MP4 arrives in the client's Telegram topic (or your DM if that client has no `telegram_topic_id`).
 
 The workflow always pulls the **latest** meta in R2. Workflow file: [`.github/workflows/podcast.yml`](.github/workflows/podcast.yml).
 
@@ -107,7 +108,7 @@ bun run upload-telegram out/tim-gailey-hola-joe.mp4
 | 3. Transcribe | `bun run transcribe` | First run installs whisper.cpp + ~1.5 GB model |
 | 4. Preview | `bun run dev` | Tweak props in Studio sidebar or `src/Root.tsx` |
 | 5. Render | `bun run render:phone` | Default path `out/audiogram-phone.mp4` |
-| 6. Telegram | `bun run upload-telegram` | DM yourself the MP4 |
+| 6. Telegram | `bun run upload-telegram` | Client topic if mapped, otherwise DM |
 
 **Linux/WSL first-time transcribe:**
 
