@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import type { Language } from "@remotion/install-whisper-cpp";
 import { convertAudio } from "./convert-audio";
+import { enhanceAudio } from "./enhance-audio";
 import { getClientByKey } from "./d1-clients";
 import {
   fetchLatestPodcastJob,
@@ -20,6 +21,9 @@ import {
 import { uploadVideoToTelegram } from "./upload-telegram";
 
 const PUBLIC_DIR = "./public";
+/** Unprocessed PCM after convert — kept for A/B debug. */
+const RAW_WAV = path.join(PUBLIC_DIR, "dialogue.raw.wav");
+/** Enhanced PCM used by Whisper trim + Remotion. */
 const OUTPUT_WAV = path.join(PUBLIC_DIR, "dialogue.wav");
 const CAPTIONS_JSON = path.join(PUBLIC_DIR, "captions.json");
 const DEFAULT_SAMPLE_RATE = 48_000;
@@ -163,7 +167,7 @@ async function stepDownloadConvert(timings: StepTiming[]) {
     const { timing } = await timed("Convert", () =>
       convertAudio({
         inputPath: audioLocalPath,
-        outputPath: OUTPUT_WAV,
+        outputPath: RAW_WAV,
         sampleRate: DEFAULT_SAMPLE_RATE,
       }),
     );
@@ -171,13 +175,27 @@ async function stepDownloadConvert(timings: StepTiming[]) {
     console.info(`   ⏱  Convert done in ${formatDuration(timing.ms)}`);
   }
 
+  // Enhance the full WAV before Whisper trim / Remotion. Same processed file
+  // for both so captions stay aligned (PREV-722).
+  console.info(`\n🎚  Step — Enhance audio (podcast loudness)`);
+  console.info(`   Raw:       ${RAW_WAV}`);
+  console.info(`   Processed: ${OUTPUT_WAV}`);
+  {
+    const { timing } = await timed("Enhance", () =>
+      enhanceAudio({
+        inputPath: RAW_WAV,
+        outputPath: OUTPUT_WAV,
+        sampleRate: DEFAULT_SAMPLE_RATE,
+      }),
+    );
+    timings.push(timing);
+    console.info(`   ⏱  Enhance done in ${formatDuration(timing.ms)}`);
+  }
+
   return { meta, language, titleText, renderOutput };
 }
 
-async function stepTranscribeLocal(
-  language: Language,
-  timings: StepTiming[],
-) {
+async function stepTranscribeLocal(language: Language, timings: StepTiming[]) {
   console.info(`\n📝 Step — Transcribe (local whisper.cpp)`);
   console.info("   Detecting when speech begins (ffmpeg silencedetect)...");
   {
@@ -275,7 +293,8 @@ async function runPodcast(mode: Mode = "full") {
 
     const totalMs = performance.now() - pipelineStart;
     console.log("\n✅ Prepare done (audio ready for Whisper).");
-    console.log(`   Full WAV (Remotion): ${OUTPUT_WAV}`);
+    console.log(`   Raw WAV (debug):       ${RAW_WAV}`);
+    console.log(`   Full WAV (Remotion):   ${OUTPUT_WAV}`);
     console.log(`   Whisper WAV (trimmed): ${WHISPER_INPUT_WAV}`);
     printTimingSummary(timings, totalMs);
     return;
