@@ -40,6 +40,7 @@
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc",
     "convert-audio": "bun convert-audio.ts",
+    "enhance-audio": "bun enhance-audio.ts",
     "transcribe": "bun transcribe.ts",
     "shift-captions": "bun shift-captions.ts",
     "podcast": "bun podcast.ts",
