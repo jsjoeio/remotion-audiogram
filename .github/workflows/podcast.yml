@@ -23,6 +23,7 @@
 # Secrets (repo Settings → Secrets and variables → Actions):
 #   TELEGRAM_BOT_TOKEN
 #   ALLOWED_TELEGRAM_USER_ID
+#   TELEGRAM_GROUP_CHAT_ID  (forum group, e.g. -100…; optional, falls back to DM)
 #   CLOUDFLARE_API_TOKEN   (R2 read on bucket telegram-voice)
 #   CLOUDFLARE_ACCOUNT_ID
 
@@ -142,6 +143,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
+          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
         run: bun run podcast:finish
 
       - name: Upload debug artifacts on failure
