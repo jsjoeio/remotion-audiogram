@@ -19,6 +19,7 @@ import {
   transcribeAudio,
   WHISPER_INPUT_WAV,
 } from "./transcribe";
+import { sendPublicAudioLinkToTelegram } from "./notify-telegram-link";
 import { uploadVideoToTelegram } from "./upload-telegram";
 
 const PUBLIC_DIR = "./public";
@@ -41,7 +42,7 @@ type StepTiming = {
  *   prepare  — CI pre-whisper (includes speech-start trim for Whisper)
  *   finish   — CI post-whisper: render → Telegram
  *   app      — app.jsjoe.io path: download → enhance → AAC → public R2
- *              (no Whisper / Remotion / Telegram)
+ *              → Telegram topic with public URL (no Whisper / Remotion)
  */
 type Mode = "full" | "prepare" | "finish" | "app";
 
@@ -280,16 +281,40 @@ async function runPodcast(mode: Mode = "full") {
 
   if (mode === "app") {
     // Phase 1 (PREV-751): public compressed audio for app.jsjoe.io.
-    // Whisper / Remotion / Telegram stay available via full | prepare | finish.
-    await stepDownloadConvert(timings);
+    // After publish, post the URL to the client's Telegram topic (same targeting as video upload).
+    const { meta } = await stepDownloadConvert(timings);
+    let publicUrl: string | undefined;
     {
       const { result, timing } = await timed("Publish", () =>
         publishEnhancedAudioForApp(),
       );
       timings.push(timing);
       console.info(`   ⏱  Publish done in ${formatDuration(timing.ms)}`);
-      if (result.publicUrl) {
-        console.log(`\n🔗 Share this URL in program compose: ${result.publicUrl}`);
+      publicUrl = result.publicUrl;
+      if (publicUrl) {
+        console.log(`\n🔗 Share this URL in program compose: ${publicUrl}`);
+      }
+    }
+    if (publicUrl) {
+      console.info(`\n📤 Step — Telegram link`);
+      {
+        const { result, timing } = await timed("Telegram", () =>
+          sendPublicAudioLinkToTelegram({
+            publicUrl,
+            meta,
+          }),
+        );
+        timings.push(timing);
+        const sentLabel =
+          result.messageThreadId != null
+            ? `Telegram topic ${result.messageThreadId}`
+            : "Telegram DM";
+        console.info(`   ⏱  Telegram done in ${formatDuration(timing.ms)}`);
+        console.log(`\n✅ Done.`);
+        console.log(`   Client:  ${meta.clientFullName}`);
+        console.log(`   Podcast: ${meta.podcastTitle}`);
+        console.log(`   URL:     ${publicUrl}`);
+        console.log(`   Sent:    ${sentLabel}`);
       }
     }
     printTimingSummary(timings, performance.now() - pipelineStart);
