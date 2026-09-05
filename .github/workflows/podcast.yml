@@ -1,75 +1,40 @@
-# Podcast pipeline (CI) — no local whisper.cpp / cmake.
+# Podcast pipeline (CI)
 #
-# Why not bun run podcast end-to-end?
-#   Local uses @remotion/install-whisper-cpp (git clone + make + ~1.5GB model).
-#   On Actions that is slow and fragile. Instead we use the prebuilt Docker
-#   action appleboy/whisper-action (same idea as Marketplace "Speech to Text
-#   OpenAI Whisper"), then convert SRT → captions.json and render with Remotion.
+# Default path (PREV-751 Phase 1 / app.jsjoe.io):
+#   R2 download → convert → enhance → AAC → public R2 → Telegram topic with URL
 #
-# Optimization: cache ggml-medium on the host (~1.5GB). The action entrypoint
-# skips Hugging Face if models/ggml-medium.bin already exists. Measured:
-#   - Cache restore of model: ~30s
-#   - Fresh HF download: ~2.5 min
-# The action's own "Build …" step (~2.5 min, docker pull of go-whisper) is
-# unpaid for on hosted runners; caching the image as a tar did not beat it.
+# Full audiogram path (Whisper + Remotion + video Telegram) is commented out below.
 #
-# Trigger without merging to main
-#   1) workflow_dispatch must exist on the default branch (already true).
-#   2) Run code FROM a feature branch:
-#        gh workflow run podcast.yml --ref joe/optimize-pipeline -R jsjoeio/remotion-audiogram
-#      GitHub uses the workflow + source at that ref; no need to push to main.
-#   3) Optional: push to branch matching joe/podcast-ci/** auto-runs (below).
-#
-# Secrets (repo Settings → Secrets and variables → Actions):
-#   TELEGRAM_BOT_TOKEN
-#   ALLOWED_TELEGRAM_USER_ID
-#   TELEGRAM_GROUP_CHAT_ID  (forum group, e.g. -100…; optional, falls back to DM)
-#   CLOUDFLARE_API_TOKEN   (R2 read on bucket telegram-voice)
-#   CLOUDFLARE_ACCOUNT_ID
-#
-# Optional env (not required): PODCAST_DENOISE=afftdn|arnndn|off (default off).
+# Secrets:
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   PUBLIC_AUDIO_BASE_URL
+#   TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, TELEGRAM_GROUP_CHAT_ID
 
 name: Podcast pipeline
 
 on:
   workflow_dispatch:
-  # Test workflow changes without merging to main: push to a ci branch.
   push:
     branches:
       - "joe/podcast-ci/**"
 
 env:
   WHISPER_MODEL: medium
+  PUBLIC_AUDIO_BUCKET: wellness-program-audio
 
 jobs:
   podcast:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Chrome/Remotion + system ffmpeg for podcast loudness (PREV-722).
-      # Remotion's bundled ffmpeg disables most filters (no highpass / EQ /
-      # acompressor / alimiter). Whisper is Docker — no cmake here.
-      - name: System deps (Chrome libs + ffmpeg)
+      - name: System deps (ffmpeg)
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            ffmpeg \
-            libnss3 \
-            libdbus-1-3 \
-            libatk1.0-0 \
-            libgbm-dev \
-            libasound2t64 \
-            libxrandr2 \
-            libxkbcommon-dev \
-            libxfixes3 \
-            libxcomposite1 \
-            libxdamage1 \
-            libpango-1.0-0 \
-            libcairo2
+          sudo apt-get install -y ffmpeg
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -86,83 +51,36 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
 
-      # Host-side model; whisper-action entrypoint skips HF if this file exists.
-      - name: Cache Whisper model
-        uses: actions/cache@v4
-        with:
-          path: models
-          key: whisper-ggml-${{ env.WHISPER_MODEL }}-v1
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Ensure Remotion browser
-        run: npx remotion browser ensure
-
-      # R2 → public/dialogue.raw.wav (PCM) → public/dialogue.wav (loudness
-      # chain) + .cache/dialogue-whisper.wav (trimmed from speech start) +
-      # .cache/speech-start.json. Denoise off unless PODCAST_DENOISE=afftdn|arnndn.
-      - name: Prepare (download R2 + convert + enhance + speech-start trim)
+      - name: App audio (download + enhance + publish AAC + Telegram link)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bun run podcast:prepare
+          PUBLIC_AUDIO_BASE_URL: ${{ secrets.PUBLIC_AUDIO_BASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
+          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
+        run: |
+          if [ -n "${{ vars.PUBLIC_AUDIO_BUCKET }}" ]; then
+            export PUBLIC_AUDIO_BUCKET="${{ vars.PUBLIC_AUDIO_BUCKET }}"
+          fi
+          bun run podcast:app
 
-      # A/B listen: raw AirPods vs processed (~−16 LUFS). Also uploaded on
-      # failure below. models/ already caches optional arnndn cb.rnnn.
-      - name: Upload raw vs processed audio
+      - name: Upload processed audio artifacts
         uses: actions/upload-artifact@v4
         with:
           name: podcast-audio
           path: |
             public/dialogue.raw.wav
             public/dialogue.wav
+            public/*.m4a
           if-no-files-found: ignore
           retention-days: 7
 
-      # Pre-seed so appleboy entrypoint does not re-download (~1.5GB) every run.
-      - name: Ensure Whisper model
-        run: |
-          set -euo pipefail
-          mkdir -p models
-          model_file="models/ggml-${WHISPER_MODEL}.bin"
-          if [ -f "$model_file" ]; then
-            echo "Model already present: $model_file"
-            ls -lh "$model_file"
-            exit 0
-          fi
-          echo "Downloading ggml-${WHISPER_MODEL}.bin…"
-          curl -L --fail --retry 3 --retry-delay 5 \
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin" \
-            -o "$model_file"
-          ls -lh "$model_file"
-
-      # Prebuilt whisper.cpp in Docker — still rebuilds the thin action image
-      # each job (~2.5 min); model is already on disk when entrypoint runs.
-      # Use trimmed .cache/dialogue-whisper.wav (same speech-start cut as local
-      # bun run podcast). srt-to-captions re-adds that offset to caption times.
-      # https://github.com/marketplace/actions/speech-to-text-openai-whisper
-      - name: Transcribe with whisper-action
-        uses: appleboy/whisper-action@v0.1.1
-        with:
-          model: medium
-          audio_path: .cache/dialogue-whisper.wav
-          output_folder: public
-          output_filename: captions
-          output_format: srt
-          print_progress: true
-
-      # Shifts SRT by .cache/speech-start.json so times match full dialogue.wav
-      - name: SRT → captions.json
-        run: bun run srt-to-captions
-
-      # Render + Telegram (captions already on disk; no local whisper)
-      - name: Finish (render + Telegram)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
-          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
-        run: bun run podcast:finish
+      # ─── Full audiogram path (Whisper + Remotion + video Telegram) ────────
+      # Commented out — uncomment to restore video delivery.
 
       - name: Upload debug artifacts on failure
         if: failure()
@@ -170,11 +88,8 @@ jobs:
         with:
           name: podcast-debug
           path: |
-            public/captions.srt
-            public/captions.json
-            public/dialogue.raw.wav
-            public/dialogue.wav
-            .cache/speech-start.json
+            public/
+            .cache/
             out/
           if-no-files-found: ignore
           retention-days: 7
