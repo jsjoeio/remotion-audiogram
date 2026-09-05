@@ -1,28 +1,14 @@
 # Podcast pipeline (CI)
 #
 # Default path (PREV-751 Phase 1 / app.jsjoe.io):
-#   R2 download → convert → enhance → AAC → public R2 (wellness-program-audio)
+#   R2 download → convert → enhance → AAC → public R2 → Telegram topic with URL
 #
-# Full audiogram path (Whisper + Remotion + Telegram) is commented out below.
-# Uncomment those steps to restore video delivery; leave the app publish step
-# as-is or run both.
+# Full audiogram path (Whisper + Remotion + video Telegram) is commented out below.
 #
-# Trigger without merging to main
-#   gh workflow run podcast.yml --ref <branch> -R jsjoeio/remotion-audiogram
-#
-# Secrets (repo Settings → Secrets and variables → Actions):
-#   CLOUDFLARE_API_TOKEN   (R2 read telegram-voice + write wellness-program-audio)
-#   CLOUDFLARE_ACCOUNT_ID
-#   PUBLIC_AUDIO_BASE_URL  (optional but recommended — e.g. https://pub-….r2.dev
-#                          or https://audio.jsjoe.io after custom domain)
-#   PUBLIC_AUDIO_BUCKET    (optional, default wellness-program-audio)
-#
-# Video path only (when re-enabled):
-#   TELEGRAM_BOT_TOKEN
-#   ALLOWED_TELEGRAM_USER_ID
-#   TELEGRAM_GROUP_CHAT_ID
-#
-# Optional env: PODCAST_DENOISE=afftdn|arnndn|off (default off).
+# Secrets:
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   PUBLIC_AUDIO_BASE_URL
+#   TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, TELEGRAM_GROUP_CHAT_ID
 
 name: Podcast pipeline
 
@@ -45,8 +31,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # System ffmpeg for loudness enhance + AAC encode.
-      # (Remotion's bundled ffmpeg lacks the enhance filters.)
       - name: System deps (ffmpeg)
         run: |
           sudo apt-get update
@@ -70,13 +54,14 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # R2 (telegram-voice) → enhance → AAC → public R2 (wellness-program-audio)
-      - name: App audio (download + enhance + publish AAC)
+      - name: App audio (download + enhance + publish AAC + Telegram link)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Inherits PUBLIC_AUDIO_BUCKET from job env; override via repo variable if set
           PUBLIC_AUDIO_BASE_URL: ${{ secrets.PUBLIC_AUDIO_BASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
+          TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
         run: |
           if [ -n "${{ vars.PUBLIC_AUDIO_BUCKET }}" ]; then
             export PUBLIC_AUDIO_BUCKET="${{ vars.PUBLIC_AUDIO_BUCKET }}"
@@ -94,60 +79,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # ─── Full audiogram path (Whisper + Remotion + Telegram) ─────────────
-      # Commented out for app.jsjoe.io Phase 1. To restore video delivery:
-      # 1) Uncomment the steps below
-      # 2) Re-add Chrome/Remotion apt libs + Remotion browser ensure
-      # 3) Ensure Telegram secrets are set
-      #
-      # - name: Cache Whisper model
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: models
-      #     key: whisper-ggml-${{ env.WHISPER_MODEL }}-v1
-      #
-      # - name: Ensure Remotion browser
-      #   run: npx remotion browser ensure
-      #
-      # - name: Prepare (download R2 + convert + enhance + speech-start trim)
-      #   env:
-      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #   run: bun run podcast:prepare
-      #
-      # - name: Ensure Whisper model
-      #   run: |
-      #     set -euo pipefail
-      #     mkdir -p models
-      #     model_file="models/ggml-${WHISPER_MODEL}.bin"
-      #     if [ -f "$model_file" ]; then
-      #       echo "Model already present: $model_file"
-      #       ls -lh "$model_file"
-      #       exit 0
-      #     fi
-      #     curl -L --fail --retry 3 --retry-delay 5 \
-      #       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin" \
-      #       -o "$model_file"
-      #
-      # - name: Transcribe with whisper-action
-      #   uses: appleboy/whisper-action@v0.1.1
-      #   with:
-      #     model: medium
-      #     audio_path: .cache/dialogue-whisper.wav
-      #     output_folder: public
-      #     output_filename: captions
-      #     output_format: srt
-      #     print_progress: true
-      #
-      # - name: SRT → captions.json
-      #   run: bun run srt-to-captions
-      #
-      # - name: Finish (render + Telegram)
-      #   env:
-      #     TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      #     ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
-      #     TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
-      #   run: bun run podcast:finish
+      # ─── Full audiogram path (Whisper + Remotion + video Telegram) ────────
+      # Commented out — uncomment to restore video delivery.
 
       - name: Upload debug artifacts on failure
         if: failure()
