@@ -6,6 +6,7 @@ import type { Language } from "@remotion/install-whisper-cpp";
 import { convertAudio } from "./convert-audio";
 import { enhanceAudio } from "./enhance-audio";
 import { getClientByKey } from "./d1-clients";
+import { publishEnhancedAudioForApp } from "./encode-public-audio";
 import {
   fetchLatestPodcastJob,
   loadCachedPodcastMeta,
@@ -23,7 +24,7 @@ import { uploadVideoToTelegram } from "./upload-telegram";
 const PUBLIC_DIR = "./public";
 /** Unprocessed PCM after convert — kept for A/B debug. */
 const RAW_WAV = path.join(PUBLIC_DIR, "dialogue.raw.wav");
-/** Enhanced PCM used by Whisper trim + Remotion. */
+/** Enhanced PCM used by Whisper trim + Remotion / public AAC encode. */
 const OUTPUT_WAV = path.join(PUBLIC_DIR, "dialogue.wav");
 const CAPTIONS_JSON = path.join(PUBLIC_DIR, "captions.json");
 const DEFAULT_SAMPLE_RATE = 48_000;
@@ -34,8 +35,15 @@ type StepTiming = {
   ms: number;
 };
 
-/** CLI modes: full (default), prepare (CI pre-whisper), finish (CI post-whisper). */
-type Mode = "full" | "prepare" | "finish";
+/**
+ * CLI modes:
+ *   full     — local: download → enhance → whisper.cpp → render → Telegram
+ *   prepare  — CI pre-whisper (includes speech-start trim for Whisper)
+ *   finish   — CI post-whisper: render → Telegram
+ *   app      — app.jsjoe.io path: download → enhance → AAC → public R2
+ *              (no Whisper / Remotion / Telegram)
+ */
+type Mode = "full" | "prepare" | "finish" | "app";
 
 /** Human-readable duration, e.g. "842ms", "12.3s", "1m 24s". */
 function formatDuration(ms: number): string {
@@ -124,11 +132,11 @@ function renderPhone(titleText: string, renderOutput: string) {
 
 function parseMode(argv: string[]): Mode {
   const arg = argv[2];
-  if (arg === "prepare" || arg === "finish" || arg === "full") {
+  if (arg === "prepare" || arg === "finish" || arg === "full" || arg === "app") {
     return arg;
   }
   if (arg && !arg.startsWith("-")) {
-    console.error(`Unknown mode "${arg}". Use: full | prepare | finish`);
+    console.error(`Unknown mode "${arg}". Use: full | prepare | finish | app`);
     process.exit(1);
   }
   return "full";
@@ -175,8 +183,7 @@ async function stepDownloadConvert(timings: StepTiming[]) {
     console.info(`   ⏱  Convert done in ${formatDuration(timing.ms)}`);
   }
 
-  // Enhance the full WAV before Whisper trim / Remotion. Same processed file
-  // for both so captions stay aligned (PREV-722).
+  // Enhance the full WAV before Whisper trim / Remotion / public AAC.
   console.info(`\n🎚  Step — Enhance audio (podcast loudness)`);
   console.info(`   Raw:       ${RAW_WAV}`);
   console.info(`   Processed: ${OUTPUT_WAV}`);
@@ -270,6 +277,24 @@ async function runPodcast(mode: Mode = "full") {
 
   const pipelineStart = performance.now();
   const timings: StepTiming[] = [];
+
+  if (mode === "app") {
+    // Phase 1 (PREV-751): public compressed audio for app.jsjoe.io.
+    // Whisper / Remotion / Telegram stay available via full | prepare | finish.
+    await stepDownloadConvert(timings);
+    {
+      const { result, timing } = await timed("Publish", () =>
+        publishEnhancedAudioForApp(),
+      );
+      timings.push(timing);
+      console.info(`   ⏱  Publish done in ${formatDuration(timing.ms)}`);
+      if (result.publicUrl) {
+        console.log(`\n🔗 Share this URL in program compose: ${result.publicUrl}`);
+      }
+    }
+    printTimingSummary(timings, performance.now() - pipelineStart);
+    return;
+  }
 
   if (mode === "prepare") {
     await stepDownloadConvert(timings);
