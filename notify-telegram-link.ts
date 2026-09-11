@@ -57,7 +57,7 @@ export async function sendPublicAudioLinkToTelegram(options: {
   const text =
     `🎙️ ${title}\n\n` +
     `${publicUrl}\n\n` +
-    `Paste into app.jsjoe.io/program/compose → Podcast URL`;
+    `Paste into admin.jsjoe.io/program/compose → Podcast URL`;
 
   console.log("\n📤 Post public audio link to Telegram");
   console.log(`   Chat: ${target.label}`);
