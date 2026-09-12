@@ -181,6 +181,30 @@ export async function findLatestMetaObject(): Promise<R2ListObject> {
 }
 
 /**
+ * Validate an explicit R2 meta object key: must live under `meta/` and end in `.json`.
+ */
+export function validateMetaKey(metaKey: string): string {
+  const key = metaKey.trim();
+  if (!key) {
+    throw new Error("metaKey is empty.");
+  }
+  if (key.includes("..") || key.startsWith("/") || key.includes("\\")) {
+    throw new Error(
+      `Invalid metaKey "${key}": must be a relative R2 object key (no "..", leading "/", or backslashes).`,
+    );
+  }
+  if (!key.startsWith(META_PREFIX)) {
+    throw new Error(
+      `Invalid metaKey "${key}": must start with "${META_PREFIX}".`,
+    );
+  }
+  if (!key.endsWith(".json")) {
+    throw new Error(`Invalid metaKey "${key}": must end with ".json".`);
+  }
+  return key;
+}
+
+/**
  * Download an R2 object with wrangler CLI → local file.
  * objectPath is the key only (not bucket/key).
  */
@@ -263,24 +287,34 @@ export type FetchedPodcastJob = {
 };
 
 /**
- * Fetch the latest podcast job from R2:
- * 1. List meta/, pick newest by last_modified
+ * Fetch a podcast job from R2:
+ * 1. Resolve meta key — explicit `metaKey` / options, else newest under meta/
  * 2. Download meta JSON → .cache/latest-podcast-meta.json
  * 3. Download audio → public/dialogue.<ext>
  */
 export async function fetchLatestPodcastJob(options?: {
   audioDestDir?: string;
   audioBaseName?: string;
+  /** Explicit R2 meta object key (must be under meta/ and end in .json). */
+  metaKey?: string;
 }): Promise<FetchedPodcastJob> {
   const audioDestDir = options?.audioDestDir ?? "./public";
   const audioBaseName = options?.audioBaseName ?? "dialogue";
 
-  console.info(`\n☁  Fetching latest podcast job from R2 (${R2_BUCKET})…`);
-  const latest = await findLatestMetaObject();
-  const metaKey = latest.key!;
-  console.info(`   Meta key: ${metaKey}`);
-  if (latest.last_modified) {
-    console.info(`   Modified: ${latest.last_modified}`);
+  let metaKey: string;
+  const explicit = options?.metaKey?.trim();
+  if (explicit) {
+    metaKey = validateMetaKey(explicit);
+    console.info(`\n☁  Fetching podcast job from R2 (${R2_BUCKET}) by meta key…`);
+    console.info(`   Meta key: ${metaKey}`);
+  } else {
+    console.info(`\n☁  Fetching latest podcast job from R2 (${R2_BUCKET})…`);
+    const latest = await findLatestMetaObject();
+    metaKey = latest.key!;
+    console.info(`   Meta key: ${metaKey}`);
+    if (latest.last_modified) {
+      console.info(`   Modified: ${latest.last_modified}`);
+    }
   }
 
   if (!fs.existsSync(CACHE_DIR)) {
