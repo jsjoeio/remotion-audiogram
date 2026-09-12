@@ -31,7 +31,7 @@ export async function notifyAdminPodcastReady(
     );
   }
 
-  console.log("\n\ud83d\udce1 POST admin podcast-ready callback");
+  console.log("\n📡 POST admin podcast-ready callback");
   console.log(`   URL: ${url}`);
   console.log(`   jobId: ${payload.jobId ?? "(none)"}`);
   console.log(`   clientId: ${payload.clientId ?? "(none)"}`);
@@ -52,5 +52,5 @@ export async function notifyAdminPodcastReady(
     );
   }
 
-  console.log(`\u2705 Admin callback ok (HTTP ${res.status})`);
+  console.log(`✅ Admin callback ok (HTTP ${res.status})`);
 }
