@@ -19,6 +19,7 @@ import {
   transcribeAudio,
   WHISPER_INPUT_WAV,
 } from "./transcribe";
+import { notifyAdminPodcastReady } from "./notify-admin-callback";
 import { sendPublicAudioLinkToTelegram } from "./notify-telegram-link";
 import { uploadVideoToTelegram } from "./upload-telegram";
 
@@ -42,7 +43,8 @@ type StepTiming = {
  *   prepare  — CI pre-whisper (includes speech-start trim for Whisper)
  *   finish   — CI post-whisper: render → Telegram
  *   app      — app.jsjoe.io path: download → enhance → AAC → public R2
- *              → Telegram topic with public URL (no Whisper / Remotion)
+ *              → optional admin callback + Telegram topic with public URL
+ *              (no Whisper / Remotion)
  */
 type Mode = "full" | "prepare" | "finish" | "app";
 
@@ -71,13 +73,19 @@ async function timed<T>(
 }
 
 function printTimingSummary(timings: StepTiming[], totalMs: number) {
-  console.log("\n⏱  Timing");
-  console.log("────────────────────────────");
+  console.log("\n\u23f1  Timing");
+  console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   for (const { name, ms } of timings) {
     console.log(`  ${name.padEnd(12)} ${formatDuration(ms)}`);
   }
-  console.log("────────────────────────────");
+  console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   console.log(`  ${"Total".padEnd(12)} ${formatDuration(totalMs)}`);
+}
+
+/** true / 1 / yes (case-insensitive). Empty/absent = false (push triggers). */
+function isTruthyEnv(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes";
 }
 
 /**
@@ -92,7 +100,7 @@ function resolveLanguage(meta: PodcastMeta): Language {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`   ⚠  D1 clients unavailable (${msg}); using meta.language`);
+    console.warn(`   \u26a0  D1 clients unavailable (${msg}); using meta.language`);
   }
   return meta.language;
 }
@@ -115,7 +123,7 @@ function renderPhone(titleText: string, renderOutput: string) {
     fs.mkdirSync(outDir, { recursive: true });
   }
 
-  console.info(`\n🎬 Rendering phone video → ${renderOutput}`);
+  console.info(`\n\ud83c\udfac Rendering phone video \u2192 ${renderOutput}`);
   console.info(`   titleText: ${titleText}`);
 
   try {
@@ -144,7 +152,7 @@ function parseMode(argv: string[]): Mode {
 }
 
 async function stepDownloadConvert(timings: StepTiming[]) {
-  console.info(`☁  Step — Download from R2`);
+  console.info(`\u2601  Step \u2014 Download from R2`);
   const { result: job, timing: fetchTiming } = await timed("Download", () =>
     fetchLatestPodcastJob({
       audioDestDir: PUBLIC_DIR,
@@ -152,14 +160,14 @@ async function stepDownloadConvert(timings: StepTiming[]) {
     }),
   );
   timings.push(fetchTiming);
-  console.info(`   ⏱  Download done in ${formatDuration(fetchTiming.ms)}`);
+  console.info(`   \u23f1  Download done in ${formatDuration(fetchTiming.ms)}`);
 
   const { meta, audioLocalPath, metaLocalPath, metaKey } = job;
   const language = resolveLanguage(meta);
   const titleText = `${meta.clientFullName} - ${meta.podcastTitle}`;
   const renderOutput = resolveOutputPath(meta);
 
-  console.log("\n────────────────────────────");
+  console.log("\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   console.log(`Client:   ${meta.clientKey} (${meta.clientFullName})`);
   console.log(`Language: ${language}`);
   console.log(`Title:    ${meta.podcastTitle}`);
@@ -168,9 +176,9 @@ async function stepDownloadConvert(timings: StepTiming[]) {
   console.log(`Audio:    ${audioLocalPath}`);
   console.log(`Cached:   ${metaLocalPath}`);
   console.log(`Output:   ${renderOutput}`);
-  console.log("────────────────────────────\n");
+  console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
 
-  console.info(`\n🔊 Step — Convert audio`);
+  console.info(`\n\ud83d\udd0a Step \u2014 Convert audio`);
   console.info(`   Input: ${audioLocalPath}`);
   {
     const { timing } = await timed("Convert", () =>
@@ -181,11 +189,11 @@ async function stepDownloadConvert(timings: StepTiming[]) {
       }),
     );
     timings.push(timing);
-    console.info(`   ⏱  Convert done in ${formatDuration(timing.ms)}`);
+    console.info(`   \u23f1  Convert done in ${formatDuration(timing.ms)}`);
   }
 
   // Enhance the full WAV before Whisper trim / Remotion / public AAC.
-  console.info(`\n🎚  Step — Enhance audio (podcast loudness)`);
+  console.info(`\n\ud83c\udf9a  Step \u2014 Enhance audio (podcast loudness)`);
   console.info(`   Raw:       ${RAW_WAV}`);
   console.info(`   Processed: ${OUTPUT_WAV}`);
   {
@@ -197,19 +205,19 @@ async function stepDownloadConvert(timings: StepTiming[]) {
       }),
     );
     timings.push(timing);
-    console.info(`   ⏱  Enhance done in ${formatDuration(timing.ms)}`);
+    console.info(`   \u23f1  Enhance done in ${formatDuration(timing.ms)}`);
   }
 
-  return { meta, language, titleText, renderOutput };
+  return { meta, metaKey, language, titleText, renderOutput };
 }
 
 async function stepTranscribeLocal(language: Language, timings: StepTiming[]) {
-  console.info(`\n📝 Step — Transcribe (local whisper.cpp)`);
+  console.info(`\n\ud83d\udcdd Step \u2014 Transcribe (local whisper.cpp)`);
   console.info("   Detecting when speech begins (ffmpeg silencedetect)...");
   {
     const { timing } = await timed("Transcribe", async () => {
       const speechStartsAtSecond = await detectSpeechStart(OUTPUT_WAV);
-      console.info(`   → Speech begins at ${speechStartsAtSecond}s`);
+      console.info(`   \u2192 Speech begins at ${speechStartsAtSecond}s`);
       console.info(`   Language: ${language}`);
 
       await transcribeAudio({
@@ -220,7 +228,7 @@ async function stepTranscribeLocal(language: Language, timings: StepTiming[]) {
       });
     });
     timings.push(timing);
-    console.info(`   ⏱  Transcribe done in ${formatDuration(timing.ms)}`);
+    console.info(`   \u23f1  Transcribe done in ${formatDuration(timing.ms)}`);
   }
 }
 
@@ -239,16 +247,16 @@ async function stepRenderUpload(
     throw new Error(`Missing ${OUTPUT_WAV}. Run prepare/convert first.`);
   }
 
-  console.info(`\n🎥 Step — Render`);
+  console.info(`\n\ud83c\udfa5 Step \u2014 Render`);
   {
     const { timing } = await timed("Render", () =>
       renderPhone(titleText, renderOutput),
     );
     timings.push(timing);
-    console.info(`   ⏱  Render done in ${formatDuration(timing.ms)}`);
+    console.info(`   \u23f1  Render done in ${formatDuration(timing.ms)}`);
   }
 
-  console.info(`\n📤 Step — Upload to Telegram`);
+  console.info(`\n\ud83d\udce4 Step \u2014 Upload to Telegram`);
   let sentLabel = "Telegram DM";
   {
     const { result, timing } = await timed("Telegram", () =>
@@ -263,10 +271,10 @@ async function stepRenderUpload(
       result.messageThreadId != null
         ? `Telegram topic ${result.messageThreadId}`
         : "Telegram DM";
-    console.info(`   ⏱  Telegram done in ${formatDuration(timing.ms)}`);
+    console.info(`   \u23f1  Telegram done in ${formatDuration(timing.ms)}`);
   }
 
-  console.log("\n✅ Done.");
+  console.log("\n\u2705 Done.");
   console.log(`   Client:  ${meta.clientFullName}`);
   console.log(`   Podcast: ${meta.podcastTitle}`);
   console.log(`   Video:   ${renderOutput}`);
@@ -274,47 +282,78 @@ async function stepRenderUpload(
 }
 
 async function runPodcast(mode: Mode = "full") {
-  console.log(`🎙  Podcast pipeline (mode: ${mode})\n`);
+  console.log(`\ud83c\udfa4  Podcast pipeline (mode: ${mode})\n`);
 
   const pipelineStart = performance.now();
   const timings: StepTiming[] = [];
 
   if (mode === "app") {
     // Phase 1 (PREV-751): public compressed audio for app.jsjoe.io.
-    // After publish, post the URL to the client's Telegram topic (same targeting as video upload).
-    const { meta } = await stepDownloadConvert(timings);
+    // After publish: optional admin callback (PREV-775), then Telegram unless skipped.
+    const { meta, metaKey } = await stepDownloadConvert(timings);
     let publicUrl: string | undefined;
     {
       const { result, timing } = await timed("Publish", () =>
         publishEnhancedAudioForApp(),
       );
       timings.push(timing);
-      console.info(`   ⏱  Publish done in ${formatDuration(timing.ms)}`);
+      console.info(`   \u23f1  Publish done in ${formatDuration(timing.ms)}`);
       publicUrl = result.publicUrl;
       if (publicUrl) {
-        console.log(`\n🔗 Share this URL in program compose: ${publicUrl}`);
+        console.log(`\n\ud83d\udd17 Share this URL in program compose: ${publicUrl}`);
       }
     }
     if (publicUrl) {
-      console.info(`\n📤 Step — Telegram link`);
+      console.info(`\n\ud83d\udce1 Step \u2014 Admin callback`);
       {
-        const { result, timing } = await timed("Telegram", () =>
-          sendPublicAudioLinkToTelegram({
+        const { timing } = await timed("Admin callback", () =>
+          notifyAdminPodcastReady({
+            jobId: process.env.PODCAST_JOB_ID?.trim() || null,
             publicUrl,
-            meta,
+            clientId: meta.clientId ?? null,
+            clientKey: meta.clientKey,
+            clientFullName: meta.clientFullName,
+            podcastTitle: meta.podcastTitle,
+            metaKey,
           }),
         );
         timings.push(timing);
-        const sentLabel =
-          result.messageThreadId != null
-            ? `Telegram topic ${result.messageThreadId}`
-            : "Telegram DM";
-        console.info(`   ⏱  Telegram done in ${formatDuration(timing.ms)}`);
-        console.log(`\n✅ Done.`);
+        console.info(
+          `   \u23f1  Admin callback done in ${formatDuration(timing.ms)}`,
+        );
+      }
+
+      const skipTelegram = isTruthyEnv(process.env.SKIP_TELEGRAM);
+      if (skipTelegram) {
+        console.info(
+          `\n\u23ed  Skipping Telegram (SKIP_TELEGRAM=${process.env.SKIP_TELEGRAM})`,
+        );
+        console.log(`\n\u2705 Done.`);
         console.log(`   Client:  ${meta.clientFullName}`);
         console.log(`   Podcast: ${meta.podcastTitle}`);
         console.log(`   URL:     ${publicUrl}`);
-        console.log(`   Sent:    ${sentLabel}`);
+        console.log(`   Sent:    skipped (Telegram)`);
+      } else {
+        console.info(`\n\ud83d\udce4 Step \u2014 Telegram link`);
+        {
+          const { result, timing } = await timed("Telegram", () =>
+            sendPublicAudioLinkToTelegram({
+              publicUrl,
+              meta,
+            }),
+          );
+          timings.push(timing);
+          const sentLabel =
+            result.messageThreadId != null
+              ? `Telegram topic ${result.messageThreadId}`
+              : "Telegram DM";
+          console.info(`   \u23f1  Telegram done in ${formatDuration(timing.ms)}`);
+          console.log(`\n\u2705 Done.`);
+          console.log(`   Client:  ${meta.clientFullName}`);
+          console.log(`   Podcast: ${meta.podcastTitle}`);
+          console.log(`   URL:     ${publicUrl}`);
+          console.log(`   Sent:    ${sentLabel}`);
+        }
       }
     }
     printTimingSummary(timings, performance.now() - pipelineStart);
@@ -326,23 +365,23 @@ async function runPodcast(mode: Mode = "full") {
 
     // Same speech-start trim as local transcribe: Whisper gets a clean clip;
     // srt-to-captions shifts SRT times back onto the full dialogue.wav timeline.
-    console.info(`\n✂️  Step — Prepare Whisper input (detect speech + trim)`);
+    console.info(`\n\u2702\ufe0f  Step \u2014 Prepare Whisper input (detect speech + trim)`);
     {
       const { result, timing } = await timed("Whisper prep", async () => {
         const { speechStartsAtSecond, whisperInputPath } =
           await prepareWhisperInput(OUTPUT_WAV);
-        console.info(`   → Speech begins at ${speechStartsAtSecond}s`);
-        console.info(`   → Whisper input: ${whisperInputPath}`);
+        console.info(`   \u2192 Speech begins at ${speechStartsAtSecond}s`);
+        console.info(`   \u2192 Whisper input: ${whisperInputPath}`);
         return { speechStartsAtSecond, whisperInputPath };
       });
       timings.push(timing);
       console.info(
-        `   ⏱  Whisper prep done in ${formatDuration(timing.ms)} (speech @ ${result.speechStartsAtSecond}s)`,
+        `   \u23f1  Whisper prep done in ${formatDuration(timing.ms)} (speech @ ${result.speechStartsAtSecond}s)`,
       );
     }
 
     const totalMs = performance.now() - pipelineStart;
-    console.log("\n✅ Prepare done (audio ready for Whisper).");
+    console.log("\n\u2705 Prepare done (audio ready for Whisper).");
     console.log(`   Raw WAV (debug):       ${RAW_WAV}`);
     console.log(`   Full WAV (Remotion):   ${OUTPUT_WAV}`);
     console.log(`   Whisper WAV (trimmed): ${WHISPER_INPUT_WAV}`);
@@ -354,12 +393,12 @@ async function runPodcast(mode: Mode = "full") {
     const meta = loadCachedPodcastMeta();
     const titleText = `${meta.clientFullName} - ${meta.podcastTitle}`;
     const renderOutput = resolveOutputPath(meta);
-    console.log("\n────────────────────────────");
+    console.log("\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
     console.log(`Client:   ${meta.clientKey} (${meta.clientFullName})`);
     console.log(`Title:    ${meta.podcastTitle}`);
     console.log(`Captions: ${CAPTIONS_JSON}`);
     console.log(`Output:   ${renderOutput}`);
-    console.log("────────────────────────────\n");
+    console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n");
     await stepRenderUpload(titleText, renderOutput, meta, timings);
     printTimingSummary(timings, performance.now() - pipelineStart);
     return;
@@ -376,7 +415,7 @@ async function runPodcast(mode: Mode = "full") {
 if (require.main === module) {
   const mode = parseMode(process.argv);
   runPodcast(mode).catch((err) => {
-    console.error("\n❌ Podcast pipeline failed:");
+    console.error("\n\u274c Podcast pipeline failed:");
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
   });

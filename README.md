@@ -42,6 +42,40 @@ ${PUBLIC_AUDIO_BASE_URL}/program/{clientKey}/{YYYY-MM-DD}-{slug}.m4a
 
 Whisper / Remotion video / Telegram upload remain in the repo (`bun run podcast`, `podcast:prepare`, `podcast:finish`) and are **commented out** in `.github/workflows/podcast.yml` — uncomment those steps to restore the audiogram path.
 
+### Admin callback + skip Telegram (PREV-775)
+
+After public AAC publish, the `app` mode can POST a ready payload to admin (compose path) and optionally skip Telegram.
+
+**Repo secrets (optional until admin endpoint exists):**
+
+- `ADMIN_PODCAST_CALLBACK_URL` — if unset, callback is skipped (log only; not an error)
+- `ADMIN_PODCAST_CALLBACK_TOKEN` — required when URL is set; sent as `Authorization: Bearer …`
+
+**`workflow_dispatch` inputs:**
+
+| Input | Default | Purpose |
+| --- | --- | --- |
+| `skip_telegram` | `false` | Skip posting the public URL to Telegram |
+| `job_id` | _(empty)_ | Echoed as `jobId` in the callback JSON |
+
+On `push` triggers, inputs are empty → treat as `skip_telegram=false` (Telegram still sends).
+
+Example callback body:
+
+```json
+{
+  "jobId": "job_abc123",
+  "publicUrl": "https://audio.example/program/tim/2026-09-12-hola.m4a",
+  "clientId": 42,
+  "clientKey": "tim",
+  "clientFullName": "Tim Gailey",
+  "podcastTitle": "Hola Joe",
+  "metaKey": "meta/voice/123/2026-09-12/456-xyz.json"
+}
+```
+
+The admin receive endpoint lands in a later **jsjoe.io** PR. Until then, leave `ADMIN_PODCAST_CALLBACK_URL` unset, or point it at a requestbin for smoke tests.
+
 ---
 
 ## Workflow: Telegram → R2 → video
@@ -87,7 +121,15 @@ To restore Whisper → Remotion → Telegram in CI, uncomment the block in [`.gi
 gh workflow run podcast.yml --ref <branch> -R jsjoeio/remotion-audiogram
 ```
 
-Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and ideally `PUBLIC_AUDIO_BASE_URL`. Telegram secrets only needed for the video path.
+Compose/admin smoke test (skip Telegram + echo job id):
+
+```bash
+gh workflow run podcast.yml -R jsjoeio/remotion-audiogram \
+  -f skip_telegram=true \
+  -f job_id=smoke-test-1
+```
+
+Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and ideally `PUBLIC_AUDIO_BASE_URL`. Telegram secrets only needed when not skipping Telegram. Optional: `ADMIN_PODCAST_CALLBACK_URL`, `ADMIN_PODCAST_CALLBACK_TOKEN`.
 
 ---
 

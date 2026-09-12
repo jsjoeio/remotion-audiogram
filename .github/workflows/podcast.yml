@@ -3,17 +3,30 @@
 # Default path (PREV-751 Phase 1 / app.jsjoe.io):
 #   R2 download → convert → enhance → AAC → public R2 → Telegram topic with URL
 #
+# Compose/admin path (PREV-775): set workflow_dispatch skip_telegram=true and
+# ADMIN_PODCAST_CALLBACK_* secrets to POST the ready payload instead of Telegram.
+#
 # Full audiogram path (Whisper + Remotion + video Telegram) is commented out below.
 #
 # Secrets:
 #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
 #   PUBLIC_AUDIO_BASE_URL
 #   TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, TELEGRAM_GROUP_CHAT_ID
+#   ADMIN_PODCAST_CALLBACK_URL, ADMIN_PODCAST_CALLBACK_TOKEN (optional; gradual rollout)
 
 name: Podcast pipeline
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_telegram:
+        description: "Skip posting the public URL to Telegram (compose/admin callback path)"
+        type: boolean
+        default: false
+      job_id:
+        description: "Optional admin job id echoed in the callback payload"
+        type: string
+        required: false
   push:
     branches:
       - "joe/podcast-ci/**"
@@ -62,6 +75,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ALLOWED_TELEGRAM_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
           TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
+          SKIP_TELEGRAM: ${{ inputs.skip_telegram }}
+          PODCAST_JOB_ID: ${{ inputs.job_id }}
+          ADMIN_PODCAST_CALLBACK_URL: ${{ secrets.ADMIN_PODCAST_CALLBACK_URL }}
+          ADMIN_PODCAST_CALLBACK_TOKEN: ${{ secrets.ADMIN_PODCAST_CALLBACK_TOKEN }}
         run: |
           if [ -n "${{ vars.PUBLIC_AUDIO_BUCKET }}" ]; then
             export PUBLIC_AUDIO_BUCKET="${{ vars.PUBLIC_AUDIO_BUCKET }}"
