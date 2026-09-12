@@ -27,10 +27,12 @@ import {
 
 export async function stepDownloadConvert(timings: StepTiming[]) {
   console.info(`☁  Step — Download from R2`);
+  const metaKeyEnv = process.env.PODCAST_META_KEY?.trim();
   const { result: job, timing: fetchTiming } = await timed("Download", () =>
     fetchLatestPodcastJob({
       audioDestDir: PUBLIC_DIR,
       audioBaseName: "dialogue",
+      ...(metaKeyEnv ? { metaKey: metaKeyEnv } : {}),
     }),
   );
   timings.push(fetchTiming);

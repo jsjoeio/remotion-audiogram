@@ -27,6 +27,10 @@ on:
         description: "Optional admin job id echoed in the callback payload"
         type: string
         required: false
+      meta_key:
+        description: "Optional R2 meta object key (meta/.../*.json); defaults to latest under meta/"
+        type: string
+        required: false
   push:
     branches:
       - "joe/podcast-ci/**"
@@ -77,6 +81,7 @@ jobs:
           TELEGRAM_GROUP_CHAT_ID: ${{ secrets.TELEGRAM_GROUP_CHAT_ID }}
           SKIP_TELEGRAM: ${{ inputs.skip_telegram }}
           PODCAST_JOB_ID: ${{ inputs.job_id }}
+          PODCAST_META_KEY: ${{ inputs.meta_key }}
           ADMIN_PODCAST_CALLBACK_URL: ${{ secrets.ADMIN_PODCAST_CALLBACK_URL }}
           ADMIN_PODCAST_CALLBACK_TOKEN: ${{ secrets.ADMIN_PODCAST_CALLBACK_TOKEN }}
         run: |
