@@ -44,21 +44,23 @@ Whisper / Remotion video / Telegram upload remain in the repo (`bun run podcast`
 
 ### Admin callback + skip Telegram (PREV-775)
 
-After public AAC publish, the `app` mode can POST a ready payload to admin (compose path) and optionally skip Telegram.
+After public AAC publish, when `skip_telegram` is true **or** `job_id` is set, the `app` mode POSTs a ready payload to admin (compose path). The normal Telegram-bot path (no those inputs) never hits the admin callback — so you can set secrets early without breaking bot runs if the endpoint is still missing.
 
-**Repo secrets (optional until admin endpoint exists):**
+Inside `notifyAdminPodcastReady`, if `ADMIN_PODCAST_CALLBACK_URL` is unset, the POST is skipped (log only; not an error).
 
-- `ADMIN_PODCAST_CALLBACK_URL` — if unset, callback is skipped (log only; not an error)
+**Repo secrets:**
+
+- `ADMIN_PODCAST_CALLBACK_URL` — optional until admin endpoint exists
 - `ADMIN_PODCAST_CALLBACK_TOKEN` — required when URL is set; sent as `Authorization: Bearer …`
 
 **`workflow_dispatch` inputs:**
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `skip_telegram` | `false` | Skip posting the public URL to Telegram |
-| `job_id` | _(empty)_ | Echoed as `jobId` in the callback JSON |
+| `skip_telegram` | `false` | Skip posting the public URL to Telegram (also enables admin callback) |
+| `job_id` | _(empty)_ | Echoed as `jobId` in the callback JSON (also enables admin callback) |
 
-On `push` triggers, inputs are empty → treat as `skip_telegram=false` (Telegram still sends).
+On `push` triggers, inputs are empty → treat as `skip_telegram=false` (Telegram still sends; no admin callback).
 
 Example callback body:
 

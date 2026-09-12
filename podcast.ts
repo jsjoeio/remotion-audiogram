@@ -55,22 +55,34 @@ async function runPodcast(mode: Mode = "full") {
       }
     }
     if (publicUrl) {
-      console.info(`\n📡 Step — Admin callback`);
-      {
-        const { timing } = await timed("Admin callback", () =>
-          notifyAdminPodcastReady({
-            jobId: process.env.PODCAST_JOB_ID?.trim() || null,
-            publicUrl,
-            clientId: meta.clientId ?? null,
-            clientKey: meta.clientKey,
-            clientFullName: meta.clientFullName,
-            podcastTitle: meta.podcastTitle,
-            metaKey,
-          }),
-        );
-        timings.push(timing);
+      // Compose path only: avoid failing Telegram-bot runs if callback URL is set
+      // before the admin endpoint exists.
+      const shouldNotifyAdmin =
+        isTruthyEnv(process.env.SKIP_TELEGRAM) ||
+        Boolean(process.env.PODCAST_JOB_ID?.trim());
+
+      if (shouldNotifyAdmin) {
+        console.info(`\n📡 Step — Admin callback`);
+        {
+          const { timing } = await timed("Admin callback", () =>
+            notifyAdminPodcastReady({
+              jobId: process.env.PODCAST_JOB_ID?.trim() || null,
+              publicUrl,
+              clientId: meta.clientId ?? null,
+              clientKey: meta.clientKey,
+              clientFullName: meta.clientFullName,
+              podcastTitle: meta.podcastTitle,
+              metaKey,
+            }),
+          );
+          timings.push(timing);
+          console.info(
+            `   ⏱  Admin callback done in ${formatDuration(timing.ms)}`,
+          );
+        }
+      } else {
         console.info(
-          `   ⏱  Admin callback done in ${formatDuration(timing.ms)}`,
+          `\n⏭  Skipping admin callback (no skip_telegram / job_id — Telegram bot path)`,
         );
       }
 
