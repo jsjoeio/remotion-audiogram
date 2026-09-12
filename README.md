@@ -59,8 +59,11 @@ Inside `notifyAdminPodcastReady`, if `ADMIN_PODCAST_CALLBACK_URL` is unset, the 
 | --- | --- | --- |
 | `skip_telegram` | `false` | Skip posting the public URL to Telegram (also enables admin callback) |
 | `job_id` | _(empty)_ | Echoed as `jobId` in the callback JSON (also enables admin callback) |
+| `meta_key` | _(empty)_ | Target a specific R2 meta object (`meta/.../*.json`) instead of the latest under `meta/` |
 
-On `push` triggers, inputs are empty → treat as `skip_telegram=false` (Telegram still sends; no admin callback).
+On `push` triggers, inputs are empty → treat as `skip_telegram=false` (Telegram still sends; no admin callback) and use the latest meta object.
+
+**Target a specific job (compose):** set `meta_key` (or locally `PODCAST_META_KEY`) to the R2 key of the meta JSON. The key must start with `meta/` and end with `.json`. When unset, the pipeline still picks the newest object under `meta/`.
 
 Example callback body:
 
@@ -82,7 +85,7 @@ The admin receive endpoint lands in a later **jsjoe.io** PR. Until then, leave `
 
 ## Workflow: Telegram → R2 → video
 
-Voice notes go to the Telegram bot ([jsjoe.io](https://github.com/jsjoeio/jsjoe.io) `telegram-webhook`), which stores audio + metadata in R2 (`telegram-voice`). This repo pulls the latest job and either publishes AAC for the app or renders an audiogram.
+Voice notes go to the Telegram bot ([jsjoe.io](https://github.com/jsjoeio/jsjoe.io) `telegram-webhook`), which stores audio + metadata in R2 (`telegram-voice`). This repo pulls the latest job (or an explicit `meta_key` / `PODCAST_META_KEY`) and either publishes AAC for the app or renders an audiogram.
 
 ### One-shot pipeline (full video)
 
@@ -94,7 +97,7 @@ bun run podcast      # download → convert → transcribe → render → Telegr
 
 What `bun run podcast` does:
 
-1. **Download** — list `meta/` in R2, pull newest metadata + audio (via Wrangler)
+1. **Download** — list `meta/` in R2, pull newest metadata + audio (via Wrangler); or use `PODCAST_META_KEY` when set
 2. **Convert** — source → `public/dialogue.raw.wav` (PCM, unprocessed)
 3. **Enhance** — FFmpeg loudness chain → `public/dialogue.wav` (~−16 LUFS)
 4. **Transcribe** — Whisper with language from D1 clients (fallback: R2 meta)
@@ -129,6 +132,15 @@ Compose/admin smoke test (skip Telegram + echo job id):
 gh workflow run podcast.yml -R jsjoeio/remotion-audiogram \
   -f skip_telegram=true \
   -f job_id=smoke-test-1
+```
+
+Compose with a specific R2 meta object:
+
+```bash
+gh workflow run podcast.yml -R jsjoeio/remotion-audiogram \
+  -f skip_telegram=true \
+  -f job_id=smoke-test-1 \
+  -f meta_key='meta/voice/123/2026-09-12/456-xyz.json'
 ```
 
 Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and ideally `PUBLIC_AUDIO_BASE_URL`. Telegram secrets only needed when not skipping Telegram. Optional: `ADMIN_PODCAST_CALLBACK_URL`, `ADMIN_PODCAST_CALLBACK_TOKEN`.
