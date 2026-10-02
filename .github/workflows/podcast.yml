@@ -38,6 +38,8 @@ on:
 env:
   WHISPER_MODEL: medium
   PUBLIC_AUDIO_BUCKET: wellness-program-audio
+  FFMPEG_URL: https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+  FFMPEG_SHA256: abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67
 
 jobs:
   podcast:
@@ -48,10 +50,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Static ffmpeg (johnvansickle 7.0.2), cached across runs. apt pulled ~105 MB
+      # from the Azure Ubuntu mirror and took 5–20 min when the mirror was slow.
+      # Has every filter enhance-audio.ts uses (loudnorm, afftdn, arnndn, …) + aac.
+      - name: Cache ffmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/ffmpeg
+          key: ffmpeg-static-${{ runner.os }}-${{ env.FFMPEG_SHA256 }}
+
       - name: System deps (ffmpeg)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          set -euo pipefail
+          dir="$HOME/.local/ffmpeg"
+          if [ "${{ steps.ffmpeg-cache.outputs.cache-hit }}" != "true" ]; then
+            mkdir -p "$dir"
+            if curl -fsSL --retry 3 --max-time 120 -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
+              && echo "$FFMPEG_SHA256  /tmp/ffmpeg.tar.xz" | sha256sum -c -; then
+              tar -xJf /tmp/ffmpeg.tar.xz -C "$dir" --strip-components=1 --wildcards '*/ffmpeg'
+            else
+              # Upstream moved/changed or is down: old apt path (nothing gets cached).
+              echo "::warning::Static ffmpeg download failed; falling back to apt"
+              rm -rf "$dir"
+              sudo apt-get update
+              sudo apt-get install -y ffmpeg
+              exit 0
+            fi
+          fi
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/ffmpeg" -hide_banner -version | sed -n 1p
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
